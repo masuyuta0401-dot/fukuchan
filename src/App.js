@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 
 // ─── GAS URL設定（PHASE 3でURLを取得したら置き換える）────────────
-const GAS_URL = "YOUR_GAS_URL_HERE";
+const GAS_URL = "https://script.google.com/macros/s/AKfycbxZOQkI6I7WdtuJpYYJgRDerxsylJU8F66FPL_yJC71g234e7sEuIPa1e12pV87Zk0m/exec";
 
 function gasPost(body) {
   if (!GAS_URL || GAS_URL === "YOUR_GAS_URL_HERE") return;
