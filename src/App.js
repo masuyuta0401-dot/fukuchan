@@ -5,7 +5,6 @@ const VAPID_PUBLIC_KEY = "BOf1p13V-69m8Qx-9mfjEYRWcsnBQZQt8W7AulVwK4lVK3dzRhWUkI
 
 async function subscribePush() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-  // 通知許可をリクエスト
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return;
   const reg = await navigator.serviceWorker.ready;
@@ -32,12 +31,10 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-// ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
 const SLEEP_SK = "bt_sleep";
 const REM_SK = "bt_reminders";
 
-// ─── Category definitions ────────────────────────────────────────
 const CATS = {
   nursing: {
     label: "食事", color: "#E8845C",
@@ -89,10 +86,8 @@ const CATS = {
 
 const ALL_ITEMS = Object.values(CATS).flatMap((c) => c.items);
 const itemByKey = (key) => ALL_ITEMS.find((i) => i.key === key) || { label: key, emoji: "•", color: "#999" };
-
 const ML_OPTIONS = [0,5,10,15,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,200,220,240,260,280,300];
 
-// ─── Helpers ─────────────────────────────────────────────────────
 const fmt = (d) => new Intl.DateTimeFormat("ja-JP",{hour:"2-digit",minute:"2-digit"}).format(new Date(d));
 const fmtDate = (d) => {
   const diff = Math.floor((Date.now()-new Date(d).getTime())/86400000);
@@ -121,18 +116,15 @@ function groupByDate(items) {
   return g;
 }
 
-// ─── useTick ─────────────────────────────────────────────────────
 function useTick(active) {
   const [,set]=useState(0);
   useEffect(()=>{ if(!active) return; const id=setInterval(()=>set(t=>t+1),15000); return()=>clearInterval(id); },[active]);
 }
 
-// ─── Main App ────────────────────────────────────────────────────
 export default function BabyTracker() {
   const [records, setRecords] = useState(()=>{ try{return JSON.parse(localStorage.getItem(SK)||"[]")}catch{return[]} });
   const [sleep, setSleep]     = useState(()=>{ try{return JSON.parse(localStorage.getItem(SLEEP_SK)||"[]")}catch{return[]} });
   const [reminders, setRem]   = useState(()=>{ try{return JSON.parse(localStorage.getItem(REM_SK)||"{}")}catch{return{}} });
-
   const [view, setView]       = useState("home");
   const [mlModal, setMlModal] = useState(null);
   const [valModal, setValModal]= useState(null);
@@ -154,7 +146,6 @@ export default function BabyTracker() {
   const isSleeping = sleep.find(s=>!s.end)||null;
   useTick(!!isSleeping);
 
-  // プッシュ通知購読
   useEffect(() => {
     subscribePush().catch(e => console.log('Push subscribe error:', e));
   }, []);
@@ -163,7 +154,6 @@ export default function BabyTracker() {
   useEffect(()=>{ localStorage.setItem(SLEEP_SK,JSON.stringify(sleep)); },[sleep]);
   useEffect(()=>{ localStorage.setItem(REM_SK,JSON.stringify(reminders)); },[reminders]);
 
-  // リマインダー
   useEffect(()=>{
     const check=()=>{
       const na={};
@@ -203,11 +193,7 @@ export default function BabyTracker() {
     addRecord(item.key);
   };
 
-  const confirmMl = (ml) => {
-    addRecord(mlModal.key,{ml});
-    setMlModal(null);
-  };
-
+  const confirmMl = (ml) => { addRecord(mlModal.key,{ml}); setMlModal(null); };
   const confirmVal = () => {
     if(!valInput) { setValModal(null); return; }
     addRecord(valModal.key,{value:valInput,unit:valModal.unit});
@@ -237,7 +223,6 @@ export default function BabyTracker() {
     setSleep(prev=>[{id:Date.now(),start,end},...prev]);
     setSleepManual(false); setSmStart(""); setSmEnd("");
   };
-
   const submitManual=()=>{
     if(!manualKey||!manualTime) return;
     const ts=new Date(manualTime).getTime();
@@ -262,7 +247,6 @@ export default function BabyTracker() {
     }),
   ].sort((a,b)=>b.timestamp-a.timestamp);
   const groupedAll=groupByDate(allItems);
-
   const SLEEP_C="#7C6FCD";
 
   return (
@@ -275,20 +259,16 @@ export default function BabyTracker() {
           })}
         </div>
       )}
-
       <header style={st.header}>
         <div style={st.headerIn}>
           <span style={st.logo}>🍼 ふくちゃん</span>
           <nav style={st.nav}>
             {[["home","記録"],["history","履歴"],["summary","グラフ"],["settings","設定"]].map(([v,l])=>(
-              <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,...(view===v?st.navActive:{})}}>
-                {l}
-              </button>
+              <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,...(view===v?st.navActive:{})}}>{l}</button>
             ))}
           </nav>
         </div>
       </header>
-
       <main style={st.main}>
         {view==="home"&&(
           <div style={st.section}>
@@ -309,7 +289,6 @@ export default function BabyTracker() {
                   style={{...st.sleepBtn,background:isSleeping?"#F4A261":"#CCC",opacity:!isSleeping?.45:1}}>☀️ 起きた</button>
               </div>
             </div>
-
             {Object.entries(CATS).map(([catKey,cat])=>(
               <div key={catKey} style={st.catBlock}>
                 <div style={{...st.catLabel,color:cat.color}}>{cat.label}</div>
@@ -318,26 +297,18 @@ export default function BabyTracker() {
                     const done=justDone===item.key;
                     return (
                       <button key={item.key} onClick={()=>handleTap(item)}
-                        style={{...st.itemBtn,
-                          background:done?item.color:"white",
-                          borderColor:item.color,
-                          color:done?"white":item.color,
-                          transform:done?"scale(0.94)":"scale(1)"}}>
+                        style={{...st.itemBtn,background:done?item.color:"white",borderColor:item.color,
+                          color:done?"white":item.color,transform:done?"scale(0.94)":"scale(1)"}}>
                         <span style={{fontSize:22}}>{item.emoji}</span>
                         <span style={{fontSize:11,fontWeight:600,marginTop:2}}>{item.label}</span>
-                        {(item.key==="milk"||item.key==="pumped")&&(
-                          <span style={{fontSize:9,opacity:.6}}>ml選択</span>
-                        )}
-                        {item.key!=="milk"&&item.key!=="pumped"&&(
-                          <span style={{fontSize:9,opacity:.5}}>{timeSince(lastOf(item.key)?.timestamp||0)||"未記録"}</span>
-                        )}
+                        {(item.key==="milk"||item.key==="pumped")&&<span style={{fontSize:9,opacity:.6}}>ml選択</span>}
+                        {item.key!=="milk"&&item.key!=="pumped"&&<span style={{fontSize:9,opacity:.5}}>{timeSince(lastOf(item.key)?.timestamp||0)||"未記録"}</span>}
                       </button>
                     );
                   })}
                 </div>
               </div>
             ))}
-
             <button onClick={()=>setManualOpen(v=>!v)} style={st.manualToggle}>✏️ 時刻を指定して記録</button>
             {manualOpen&&(
               <div style={st.manualCard}>
@@ -351,13 +322,13 @@ export default function BabyTracker() {
                   ))}
                 </div>
                 <input type="datetime-local" value={manualTime} onChange={e=>setManualTime(e.target.value)} style={st.input}/>
-                {manualKey&&(itemByKey(manualKey).hasMl)&&(
+                {manualKey&&itemByKey(manualKey).hasMl&&(
                   <select value={manualMl??""} onChange={e=>setManualMl(Number(e.target.value))} style={st.input}>
                     <option value="">ml選択</option>
                     {ML_OPTIONS.map(m=><option key={m} value={m}>{m}ml</option>)}
                   </select>
                 )}
-                {manualKey&&(itemByKey(manualKey).hasValue)&&(
+                {manualKey&&itemByKey(manualKey).hasValue&&(
                   <input type="number" placeholder={itemByKey(manualKey).placeholder}
                     value={manualVal} onChange={e=>setManualVal(e.target.value)} style={st.input}/>
                 )}
@@ -365,7 +336,6 @@ export default function BabyTracker() {
                 <button onClick={submitManual} style={st.submitBtn} disabled={!manualKey||!manualTime}>記録する</button>
               </div>
             )}
-
             <button onClick={()=>setSleepManual(v=>!v)} style={st.manualToggle}>✏️ 睡眠を時刻指定で記録</button>
             {sleepManual&&(
               <div style={st.manualCard}>
@@ -378,7 +348,6 @@ export default function BabyTracker() {
             )}
           </div>
         )}
-
         {view==="history"&&(
           <div style={st.section}>
             <h2 style={st.secTitle}>記録履歴</h2>
@@ -432,11 +401,9 @@ export default function BabyTracker() {
             ))}
           </div>
         )}
-
         {view==="summary"&&(
           <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} />
         )}
-
         {view==="settings"&&(
           <div style={st.section}>
             <h2 style={st.secTitle}>リマインダー設定</h2>
@@ -444,18 +411,29 @@ export default function BabyTracker() {
             {ALL_ITEMS.slice(0,7).map(it=>{
               const hrs = Math.round((reminders[it.key]||0)/60*10)/10;
               return (
-              <div key={it.key} style={st.settingRow}>
-                <span style={{fontSize:14,fontWeight:600}}>{it.emoji} {it.label}</span>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <input type="range" min={0} max={12} step={0.5} value={hrs}
-                    onChange={e=>setRem(prev=>({...prev,[it.key]:Math.round(Number(e.target.value)*60)}))}
-                    style={{flex:1,accentColor:it.color}}/>
-                  <span style={{fontSize:13,fontWeight:700,minWidth:44,textAlign:"right"}}>
-                    {hrs===0?"OFF":`${hrs}時間`}
-                  </span>
+                <div key={it.key} style={st.settingRow}>
+                  <span style={{fontSize:14,fontWeight:600}}>{it.emoji} {it.label}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <input type="range" min={0} max={12} step={0.5} value={hrs}
+                      onChange={e=>setRem(prev=>({...prev,[it.key]:Math.round(Number(e.target.value)*60)}))}
+                      style={{flex:1,accentColor:it.color}}/>
+                    <span style={{fontSize:13,fontWeight:700,minWidth:44,textAlign:"right"}}>
+                      {hrs===0?"OFF":`${hrs}時間`}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            )})}
+              );
+            })}
+            {/* ── 通知許可ボタン ── */}
+            <div style={{background:"#F0EEFF",border:"1px solid #7C6FCD",borderRadius:12,padding:14,display:"flex",flexDirection:"column",gap:8}}>
+              <h3 style={{margin:0,fontSize:13,color:"#7C6FCD"}}>プッシュ通知</h3>
+              <p style={{margin:0,fontSize:12,color:"#888"}}>タップして通知を許可すると、リマインダーがスマホに届きます</p>
+              <button
+                onClick={()=>subscribePush().then(()=>alert("通知を許可しました！")).catch(()=>alert("通知の許可に失敗しました。ホーム画面から起動しているか確認してください"))}
+                style={{background:"#7C6FCD",color:"white",border:"none",borderRadius:10,padding:12,fontSize:14,fontWeight:700,cursor:"pointer"}}>
+                🔔 通知を許可する
+              </button>
+            </div>
             <div style={st.dangerZone}>
               <h3 style={{margin:0,fontSize:13,color:"#C0392B"}}>データ管理</h3>
               <button onClick={()=>{ if(confirm("記録をすべて削除？")) setRecords([]); }} style={st.dangerBtn}>🗑️ 記録をすべて削除</button>
@@ -464,21 +442,17 @@ export default function BabyTracker() {
           </div>
         )}
       </main>
-
       {mlModal&&(
         <div style={st.overlay} onClick={()=>setMlModal(null)}>
           <div style={st.modal} onClick={e=>e.stopPropagation()}>
             <div style={st.modalTitle}>{mlModal.emoji} {mlModal.label}</div>
             <div style={st.mlList}>
-              {ML_OPTIONS.map(ml=>(
-                <button key={ml} onClick={()=>confirmMl(ml)} style={st.mlItem}>{ml}ml</button>
-              ))}
+              {ML_OPTIONS.map(ml=><button key={ml} onClick={()=>confirmMl(ml)} style={st.mlItem}>{ml}ml</button>)}
             </div>
             <button onClick={()=>setMlModal(null)} style={st.cancelBtn}>キャンセル</button>
           </div>
         </div>
       )}
-
       {valModal&&(
         <div style={st.overlay} onClick={()=>setValModal(null)}>
           <div style={{...st.modal,gap:12}} onClick={e=>e.stopPropagation()}>
@@ -491,23 +465,15 @@ export default function BabyTracker() {
           </div>
         </div>
       )}
-
       {otherModal&&(
         <div style={st.overlay} onClick={()=>setOtherModal(false)}>
           <div style={{...st.modal,gap:12}} onClick={e=>e.stopPropagation()}>
             <div style={st.modalTitle}>••• その他</div>
-            <input
-              placeholder="内容を入力（例：散歩、泣いた...）"
-              value={otherText}
-              onChange={e=>setOtherText(e.target.value)}
-              style={{...st.input,fontSize:16}}
-              autoFocus
-            />
-            <button
-              onClick={()=>{ if(!otherText.trim()) return; addRecord("other",{note:otherText.trim()}); setOtherModal(false); setOtherText(""); }}
-              style={st.submitBtn} disabled={!otherText.trim()}>
-              記録する
-            </button>
+            <input placeholder="内容を入力（例：散歩、泣いた...）"
+              value={otherText} onChange={e=>setOtherText(e.target.value)}
+              style={{...st.input,fontSize:16}} autoFocus/>
+            <button onClick={()=>{ if(!otherText.trim()) return; addRecord("other",{note:otherText.trim()}); setOtherModal(false); setOtherText(""); }}
+              style={st.submitBtn} disabled={!otherText.trim()}>記録する</button>
             <button onClick={()=>setOtherModal(false)} style={st.cancelBtn}>キャンセル</button>
           </div>
         </div>
@@ -516,7 +482,6 @@ export default function BabyTracker() {
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────
 const st = {
   app:      { minHeight:"100vh", background:"#FAFAF8", fontFamily:"'Hiragino Sans','Noto Sans JP',sans-serif", color:"#2D2D2D" },
   alertBar: { background:"#FFF3CD", borderBottom:"1px solid #F0C040", padding:"8px 16px", display:"flex", gap:12, flexWrap:"wrap", fontSize:13 },
@@ -563,218 +528,135 @@ const st = {
   cancelBtn: { marginTop:8, padding:14, border:"none", background:"#F5F5F5", borderRadius:12, fontSize:15, fontWeight:600, cursor:"pointer", color:"#555" },
 };
 
-// ─── SummaryView ─────────────────────────────────────────────────
 const SUMMARY_TABS = [
-  { key:"nursing",   label:"食事" },
-  { key:"sleep",     label:"睡眠" },
-  { key:"excretion", label:"排泄" },
-  { key:"health",    label:"体温" },
-  { key:"all",       label:"すべて" },
+  { key:"nursing", label:"食事" }, { key:"sleep", label:"睡眠" },
+  { key:"excretion", label:"排泄" }, { key:"health", label:"体温" }, { key:"all", label:"すべて" },
 ];
-
 const TAB_ITEMS = {
-  nursing:   [
-    { key:"breastfeed", label:"母乳",  color:"#F08080", dot:true },
-    { key:"milk",       label:"ミルク",color:"#F4A261", dot:true },
-    { key:"pumped",     label:"搾母乳",color:"#FFB347", dot:true },
-  ],
+  nursing:   [{ key:"breastfeed", label:"母乳", color:"#F08080", dot:true },{ key:"milk", label:"ミルク", color:"#F4A261", dot:true },{ key:"pumped", label:"搾母乳", color:"#FFB347", dot:true }],
   sleep:     [{ key:"__sleep__", label:"睡眠", color:"#7C6FCD", bar:true }],
-  excretion: [
-    { key:"pee",     label:"おしっこ",color:"#4ECDC4", dot:true },
-    { key:"poo",     label:"うんち",  color:"#C8A870", dot:true },
-    { key:"pee_poo", label:"両方",    color:"#88B8A8", dot:true },
-  ],
-  health:    [{ key:"temp", label:"体温", color:"#FF8C8C", line:true }],
-  all:       [
-    { key:"breastfeed",color:"#F08080",dot:true },
-    { key:"milk",      color:"#F4A261",dot:true },
-    { key:"pee",       color:"#4ECDC4",dot:true },
-    { key:"poo",       color:"#C8A870",dot:true },
-    { key:"__sleep__", color:"#7C6FCD",bar:true },
-  ],
+  excretion: [{ key:"pee", label:"おしっこ", color:"#4ECDC4", dot:true },{ key:"poo", label:"うんち", color:"#C8A870", dot:true },{ key:"pee_poo", label:"両方", color:"#88B8A8", dot:true }],
+  health:    [{ key:"temp", label:"体温", color:"#FF8C8C" }],
+  all:       [{ key:"breastfeed", color:"#F08080", dot:true },{ key:"milk", color:"#F4A261", dot:true },{ key:"pee", color:"#4ECDC4", dot:true },{ key:"poo", color:"#C8A870", dot:true },{ key:"__sleep__", color:"#7C6FCD", bar:true }],
 };
 
 function get7Days() {
   const days=[];
-  for(let i=6;i>=0;i--){
-    const d=new Date(); d.setDate(d.getDate()-i);
-    days.push(d);
-  }
+  for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); days.push(d); }
   return days;
 }
 
 function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C }) {
-  const [tab,  setTab]  = useState("nursing");
+  const [tab, setTab] = useState("nursing");
   const [mode, setMode] = useState("time");
-
-  const days   = get7Days();
-  const today  = new Date().toDateString();
-  const HOUR_H = 18;
-  const COL_W  = 44;
-  const LEFT_W = 28;
+  const days = get7Days();
+  const today = new Date().toDateString();
+  const HOUR_H=18, COL_W=44, LEFT_W=28, BAR_MAX_H=100;
 
   const amountData = days.map(d=>{
-    const ds = d.toDateString();
-    const label = `${d.getMonth()+1}/${d.getDate()}`;
-    const isToday = ds===today;
-    const milk = records.filter(r=>r.key==="milk"&&new Date(r.timestamp).toDateString()===ds).reduce((a,r)=>a+(r.ml||0),0);
-    const bf   = records.filter(r=>r.key==="breastfeed"&&new Date(r.timestamp).toDateString()===ds).length;
-    const pee  = records.filter(r=>(r.key==="pee"||r.key==="pee_poo")&&new Date(r.timestamp).toDateString()===ds).length;
-    const poo  = records.filter(r=>(r.key==="poo"||r.key==="pee_poo")&&new Date(r.timestamp).toDateString()===ds).length;
-    const slpMin = Math.round(sleep.filter(s=>s.end&&new Date(s.start).toDateString()===ds).reduce((a,s)=>a+(s.end-s.start),0)/60000);
-    const temp = (() => { const t=records.filter(r=>r.key==="temp"&&new Date(r.timestamp).toDateString()===ds); return t.length?parseFloat(t[t.length-1].value):null; })();
-    return { label, isToday, milk, bf, pee, poo, slpMin, temp };
+    const ds=d.toDateString(), label=`${d.getMonth()+1}/${d.getDate()}`, isToday=ds===today;
+    const milk=records.filter(r=>r.key==="milk"&&new Date(r.timestamp).toDateString()===ds).reduce((a,r)=>a+(r.ml||0),0);
+    const bf=records.filter(r=>r.key==="breastfeed"&&new Date(r.timestamp).toDateString()===ds).length;
+    const pee=records.filter(r=>(r.key==="pee"||r.key==="pee_poo")&&new Date(r.timestamp).toDateString()===ds).length;
+    const poo=records.filter(r=>(r.key==="poo"||r.key==="pee_poo")&&new Date(r.timestamp).toDateString()===ds).length;
+    const slpMin=Math.round(sleep.filter(s=>s.end&&new Date(s.start).toDateString()===ds).reduce((a,s)=>a+(s.end-s.start),0)/60000);
+    const temps=records.filter(r=>r.key==="temp"&&new Date(r.timestamp).toDateString()===ds);
+    const temp=temps.length?parseFloat(temps[temps.length-1].value):null;
+    return{label,isToday,milk,bf,pee,poo,slpMin,temp};
   });
 
-  const maxVal = (() => {
-    if(tab==="nursing")   return Math.max(...amountData.map(d=>Math.max(d.milk,d.bf*30)),1);
+  const maxVal=(()=>{
+    if(tab==="nursing") return Math.max(...amountData.map(d=>Math.max(d.milk,d.bf*30)),1);
     if(tab==="excretion") return Math.max(...amountData.map(d=>Math.max(d.pee,d.poo)),1);
-    if(tab==="sleep")     return Math.max(...amountData.map(d=>d.slpMin),1);
+    if(tab==="sleep") return Math.max(...amountData.map(d=>d.slpMin),1);
     return 1;
   })();
-  const BAR_MAX_H = 100;
 
-  const timeToY = (ts) => {
-    const d=new Date(ts);
-    return (d.getHours()+(d.getMinutes()/60))*HOUR_H;
-  };
-
-  const tabItemDefs = TAB_ITEMS[tab] || [];
+  const timeToY=(ts)=>{ const d=new Date(ts); return(d.getHours()+d.getMinutes()/60)*HOUR_H; };
+  const tabItemDefs=TAB_ITEMS[tab]||[];
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0,background:"#FAFAF8",minHeight:"100%"}}>
       <div style={{display:"flex",overflowX:"auto",borderBottom:"1px solid #E0E0E0",background:"white",position:"sticky",top:52,zIndex:10}}>
         {SUMMARY_TABS.map(t=>(
-          <button key={t.key} onClick={()=>setTab(t.key)} style={{
-            flex:"0 0 auto",padding:"10px 16px",border:"none",borderBottom:tab===t.key?"2.5px solid #4A90D9":"2.5px solid transparent",
-            background:"transparent",cursor:"pointer",fontSize:14,
-            color:tab===t.key?"#4A90D9":"#666",fontWeight:tab===t.key?700:400,
-            fontFamily:"inherit",transition:"all .15s",
-          }}>{t.label}</button>
+          <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:"0 0 auto",padding:"10px 16px",border:"none",
+            borderBottom:tab===t.key?"2.5px solid #4A90D9":"2.5px solid transparent",background:"transparent",
+            cursor:"pointer",fontSize:14,color:tab===t.key?"#4A90D9":"#666",fontWeight:tab===t.key?700:400,fontFamily:"inherit"}}>{t.label}</button>
         ))}
       </div>
-
       <div style={{display:"flex",margin:"10px 14px 6px",background:"#F0F0F0",borderRadius:20,padding:3}}>
         {[["time","時間"],["amount","量"]].map(([k,l])=>(
-          <button key={k} onClick={()=>setMode(k)} style={{
-            flex:1,padding:"6px 0",border:"none",borderRadius:17,
-            background:mode===k?"#4A90D9":"transparent",
-            color:mode===k?"white":"#555",
-            fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"inherit",transition:"all .15s",
-          }}>{l}</button>
+          <button key={k} onClick={()=>setMode(k)} style={{flex:1,padding:"6px 0",border:"none",borderRadius:17,
+            background:mode===k?"#4A90D9":"transparent",color:mode===k?"white":"#555",
+            fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
         ))}
       </div>
-
       {mode==="time"&&(
         <div style={{margin:"0 14px",background:"white",border:"1px solid #E8E8E8",borderRadius:12,overflow:"hidden"}}>
           <div style={{display:"flex",borderBottom:"1px solid #E8E8E8"}}>
             <div style={{width:LEFT_W,flexShrink:0}}/>
-            {days.map((d,i)=>{
-              const isT=d.toDateString()===today;
-              return(
-                <div key={i} style={{width:COL_W,flexShrink:0,textAlign:"center",padding:"6px 0",
-                  fontSize:11,fontWeight:isT?700:400,color:isT?"#E03030":"#666",
-                  background:isT?"#FFF0F0":"transparent"}}>
-                  {d.getMonth()+1}/{d.getDate()}
-                </div>
-              );
-            })}
+            {days.map((d,i)=>{ const isT=d.toDateString()===today; return(
+              <div key={i} style={{width:COL_W,flexShrink:0,textAlign:"center",padding:"6px 0",fontSize:11,
+                fontWeight:isT?700:400,color:isT?"#E03030":"#666",background:isT?"#FFF0F0":"transparent"}}>
+                {d.getMonth()+1}/{d.getDate()}
+              </div>
+            );})}
           </div>
-          <div style={{position:"relative",overflowY:"auto",maxHeight:420}}>
-            <div style={{display:"flex",pointerEvents:"none"}}>
+          <div style={{overflowY:"auto",maxHeight:420}}>
+            <div style={{display:"flex"}}>
               <div style={{width:LEFT_W,flexShrink:0,position:"relative",height:24*HOUR_H}}>
-                {[0,3,6,9,12,15,18,21].map(h=>(
-                  <div key={h} style={{position:"absolute",top:h*HOUR_H-7,right:2,fontSize:9,color:"#AAA",lineHeight:1}}>{h}</div>
-                ))}
+                {[0,3,6,9,12,15,18,21].map(h=><div key={h} style={{position:"absolute",top:h*HOUR_H-7,right:2,fontSize:9,color:"#AAA"}}>{h}</div>)}
               </div>
               <div style={{flex:1,position:"relative",height:24*HOUR_H}}>
-                {days.map((d,i)=>{
-                  const isT=d.toDateString()===today;
-                  return isT?(
-                    <div key={i} style={{position:"absolute",left:i*COL_W,top:0,width:COL_W,height:24*HOUR_H,background:"rgba(255,180,180,.12)"}}/>
-                  ):null;
-                })}
-                {[0,3,6,9,12,15,18,21,24].map(h=>(
-                  <div key={h} style={{position:"absolute",left:0,right:0,top:h*HOUR_H,borderTop:h%6===0?"1px solid #DDD":"1px dashed #EBEBEB"}}/>
-                ))}
-                {days.map((_,i)=>(
-                  <div key={i} style={{position:"absolute",left:i*COL_W,top:0,bottom:0,borderLeft:"1px solid #EBEBEB"}}/>
-                ))}
+                {days.map((d,i)=>d.toDateString()===today&&<div key={i} style={{position:"absolute",left:i*COL_W,top:0,width:COL_W,height:24*HOUR_H,background:"rgba(255,180,180,.12)"}}/>)}
+                {[0,3,6,9,12,15,18,21,24].map(h=><div key={h} style={{position:"absolute",left:0,right:0,top:h*HOUR_H,borderTop:h%6===0?"1px solid #DDD":"1px dashed #EBEBEB"}}/>)}
+                {days.map((_,i)=><div key={i} style={{position:"absolute",left:i*COL_W,top:0,bottom:0,borderLeft:"1px solid #EBEBEB"}}/>)}
                 {(tab==="sleep"||tab==="all")&&sleep.filter(s=>s.end).map(s=>{
-                  const ds=new Date(s.start).toDateString();
-                  const di=days.findIndex(d=>d.toDateString()===ds);
+                  const di=days.findIndex(d=>d.toDateString()===new Date(s.start).toDateString());
                   if(di<0) return null;
-                  const y1=timeToY(s.start), y2=timeToY(s.end);
-                  const h=Math.max(y2-y1,4);
-                  return(
-                    <div key={s.id} style={{
-                      position:"absolute",left:di*COL_W+4,width:COL_W-8,
-                      top:y1,height:h,background:"rgba(124,111,205,.35)",
-                      border:"1.5px solid #7C6FCD",borderRadius:4,
-                    }}/>
-                  );
+                  const y1=timeToY(s.start),y2=timeToY(s.end),h=Math.max(y2-y1,4);
+                  return <div key={s.id} style={{position:"absolute",left:di*COL_W+4,width:COL_W-8,top:y1,height:h,background:"rgba(124,111,205,.35)",border:"1.5px solid #7C6FCD",borderRadius:4}}/>;
                 })}
-                {tabItemDefs.filter(ti=>ti.dot).map(ti=>(
-                  records.filter(r=>r.key===ti.key).map(r=>{
-                    const ds=new Date(r.timestamp).toDateString();
-                    const di=days.findIndex(d=>d.toDateString()===ds);
-                    if(di<0) return null;
-                    const y=timeToY(r.timestamp);
-                    return(
-                      <div key={r.id} style={{
-                        position:"absolute",
-                        left:di*COL_W+(COL_W/2)-5,top:y-5,
-                        width:10,height:10,borderRadius:"50%",
-                        background:ti.color,border:"1.5px solid white",
-                        boxShadow:"0 1px 3px rgba(0,0,0,.2)",
-                      }}/>
-                    );
-                  })
-                ))}
+                {tabItemDefs.filter(ti=>ti.dot).map(ti=>records.filter(r=>r.key===ti.key).map(r=>{
+                  const di=days.findIndex(d=>d.toDateString()===new Date(r.timestamp).toDateString());
+                  if(di<0) return null;
+                  const y=timeToY(r.timestamp);
+                  return <div key={r.id} style={{position:"absolute",left:di*COL_W+COL_W/2-5,top:y-5,width:10,height:10,borderRadius:"50%",background:ti.color,border:"1.5px solid white",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>;
+                }))}
               </div>
             </div>
           </div>
           <div style={{padding:"8px 10px",borderTop:"1px solid #F0F0F0",display:"flex",gap:10,flexWrap:"wrap"}}>
             {tabItemDefs.map(ti=>(
               <span key={ti.key} style={{display:"flex",alignItems:"center",gap:4,fontSize:11,color:"#555"}}>
-                <span style={{width:10,height:10,borderRadius:ti.bar?"2px":"50%",background:ti.color,display:"inline-block"}}/>
-                {ti.label||""}
+                <span style={{width:10,height:10,borderRadius:ti.bar?"2px":"50%",background:ti.color,display:"inline-block"}}/>{ti.label||""}
               </span>
             ))}
           </div>
         </div>
       )}
-
       {mode==="amount"&&(
         <div style={{margin:"0 14px",display:"flex",flexDirection:"column",gap:12}}>
           <div style={{background:"white",border:"1px solid #E8E8E8",borderRadius:12,overflow:"hidden"}}>
             <div style={{display:"flex",borderBottom:"1px solid #E8E8E8"}}>
               <div style={{width:LEFT_W,flexShrink:0}}/>
-              {days.map((d,i)=>{
-                const isT=d.toDateString()===today;
-                return(
-                  <div key={i} style={{width:COL_W,flexShrink:0,textAlign:"center",padding:"6px 2px",
-                    fontSize:11,fontWeight:isT?700:400,color:isT?"#E03030":"#666"}}>
-                    {d.getMonth()+1}/{d.getDate()}
-                  </div>
-                );
-              })}
+              {days.map((d,i)=>{ const isT=d.toDateString()===today; return(
+                <div key={i} style={{width:COL_W,flexShrink:0,textAlign:"center",padding:"6px 2px",fontSize:11,fontWeight:isT?700:400,color:isT?"#E03030":"#666"}}>{d.getMonth()+1}/{d.getDate()}</div>
+              );})}
             </div>
-            <div style={{display:"flex",alignItems:"flex-end",height:BAR_MAX_H+16,padding:"8px 0 4px",borderBottom:"1px solid #F0F0F0",position:"relative"}}>
+            <div style={{display:"flex",alignItems:"flex-end",height:BAR_MAX_H+16,padding:"8px 0 4px",borderBottom:"1px solid #F0F0F0"}}>
               <div style={{width:LEFT_W,flexShrink:0}}/>
               {amountData.map((d,i)=>{
-                const vals = tab==="nursing"  ? [{v:d.milk,c:"#F4A261"},{v:d.bf*30,c:"#F08080"}]
-                           : tab==="excretion"? [{v:d.pee,c:"#4ECDC4"},{v:d.poo,c:"#C8A870"}]
-                           : tab==="sleep"    ? [{v:d.slpMin,c:SLEEP_C}]
-                           : tab==="health"   ? [{v:d.temp??0,c:"#FF8C8C"}]
-                           : [{v:d.milk,c:"#F4A261"}];
+                const vals=tab==="nursing"?[{v:d.milk,c:"#F4A261"},{v:d.bf*30,c:"#F08080"}]
+                  :tab==="excretion"?[{v:d.pee,c:"#4ECDC4"},{v:d.poo,c:"#C8A870"}]
+                  :tab==="sleep"?[{v:d.slpMin,c:SLEEP_C}]
+                  :tab==="health"?[{v:d.temp||0,c:"#FF8C8C"}]
+                  :[{v:d.milk,c:"#F4A261"}];
                 return(
                   <div key={i} style={{width:COL_W,flexShrink:0,display:"flex",justifyContent:"center",alignItems:"flex-end",gap:2,height:BAR_MAX_H}}>
-                    {vals.map((v,j)=>{
-                      const h=Math.round((v.v/maxVal)*BAR_MAX_H);
-                      return h>0?(
-                        <div key={j} style={{width:12,height:h,background:v.c,borderRadius:"3px 3px 0 0",opacity:d.isToday?1:.75}}/>
-                      ):<div key={j} style={{width:12,height:2,background:"#EEE",borderRadius:2}}/>;
+                    {vals.map((v,j)=>{ const h=Math.round((v.v/maxVal)*BAR_MAX_H);
+                      return h>0?<div key={j} style={{width:12,height:h,background:v.c,borderRadius:"3px 3px 0 0",opacity:d.isToday?1:.75}}/>
+                        :<div key={j} style={{width:12,height:2,background:"#EEE",borderRadius:2}}/>;
                     })}
                   </div>
                 );
@@ -783,31 +665,21 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
             <div style={{display:"flex"}}>
               <div style={{width:LEFT_W,flexShrink:0}}/>
               {amountData.map((d,i)=>{
-                const val = tab==="nursing"   ? `${d.milk}ml`
-                          : tab==="excretion" ? `${d.pee}回`
-                          : tab==="sleep"     ? `${d.slpMin}m`
-                          : tab==="health"    ? (d.temp?`${d.temp}℃`:"–")
-                          : `${d.milk}`;
-                return(
-                  <div key={i} style={{width:COL_W,flexShrink:0,textAlign:"center",fontSize:9,
-                    color:d.isToday?"#E03030":"#888",padding:"4px 0",fontWeight:d.isToday?700:400}}>
-                    {val}
-                  </div>
-                );
+                const val=tab==="nursing"?`${d.milk}ml`:tab==="excretion"?`${d.pee}回`:tab==="sleep"?`${d.slpMin}m`:tab==="health"?(d.temp?`${d.temp}℃`:"–"):`${d.milk}`;
+                return <div key={i} style={{width:COL_W,flexShrink:0,textAlign:"center",fontSize:9,color:d.isToday?"#E03030":"#888",padding:"4px 0",fontWeight:d.isToday?700:400}}>{val}</div>;
               })}
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,paddingBottom:8}}>
             {[
-              {label:"ミルク", value:`${amountData[6].milk}ml`, color:"#F4A261"},
-              {label:"母乳",   value:`${amountData[6].bf}回`,   color:"#F08080"},
-              {label:"おしっこ",value:`${amountData[6].pee}回`, color:"#4ECDC4"},
-              {label:"うんち", value:`${amountData[6].poo}回`,  color:"#C8A870"},
-              {label:"睡眠",   value:todaySleepMs>0?fmtDur(todaySleepMs):"0分", color:SLEEP_C},
-              {label:"体温",   value:amountData[6].temp?`${amountData[6].temp}℃`:"–", color:"#FF8C8C"},
+              {label:"ミルク",value:`${amountData[6].milk}ml`,color:"#F4A261"},
+              {label:"母乳",value:`${amountData[6].bf}回`,color:"#F08080"},
+              {label:"おしっこ",value:`${amountData[6].pee}回`,color:"#4ECDC4"},
+              {label:"うんち",value:`${amountData[6].poo}回`,color:"#C8A870"},
+              {label:"睡眠",value:todaySleepMs>0?fmtDur(todaySleepMs):"0分",color:SLEEP_C},
+              {label:"体温",value:amountData[6].temp?`${amountData[6].temp}℃`:"–",color:"#FF8C8C"},
             ].map(({label,value,color})=>(
-              <div key={label} style={{border:`2px solid ${color}`,borderRadius:12,padding:"10px 8px",
-                display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"white"}}>
+              <div key={label} style={{border:`2px solid ${color}`,borderRadius:12,padding:"10px 8px",display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"white"}}>
                 <span style={{fontSize:10,color:"#777"}}>{label}</span>
                 <span style={{fontSize:17,fontWeight:700,color}}>{value}</span>
               </div>
