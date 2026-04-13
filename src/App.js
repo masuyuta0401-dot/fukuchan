@@ -1,6 +1,73 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
-// ─── プッシュ通知購読 ─────────────────────────────────────────────
+// ─── Supabase ────────────────────────────────────────────────────
+const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL || "";
+const SUPABASE_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
+
+async function sbFetch(path, options={}) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return null;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": "return=minimal",
+      ...(options.headers||{}),
+    },
+  });
+  if (!res.ok) return null;
+  try { return await res.json(); } catch { return null; }
+}
+
+async function loadRecords() {
+  const data = await sbFetch("records?user_id=eq.family&order=timestamp.desc&limit=1000", {
+    headers: { "Prefer": "" }
+  });
+  return data || [];
+}
+
+async function loadSleep() {
+  const data = await sbFetch("sleep_sessions?user_id=eq.family&order=start_time.desc&limit=200", {
+    headers: { "Prefer": "" }
+  });
+  if (!data) return [];
+  return data.map(s => ({ id: s.id, start: s.start_time, end: s.end_time || null }));
+}
+
+async function upsertRecord(rec) {
+  await sbFetch("records", {
+    method: "POST",
+    headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      id: String(rec.id), user_id: "family", key: rec.key,
+      timestamp: rec.timestamp, label: rec.label || "",
+      ml: rec.ml || null, value: rec.value || null,
+      unit: rec.unit || null, note: rec.note || null,
+    }),
+  });
+}
+
+async function deleteRecord(id) {
+  await sbFetch(`records?id=eq.${encodeURIComponent(String(id))}`, { method: "DELETE" });
+}
+
+async function upsertSleep(s) {
+  await sbFetch("sleep_sessions", {
+    method: "POST",
+    headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      id: s.id, user_id: "family",
+      start_time: s.start, end_time: s.end || null,
+    }),
+  });
+}
+
+async function deleteSleepDb(id) {
+  await sbFetch(`sleep_sessions?id=eq.${id}`, { method: "DELETE" });
+}
+
+// ─── プッシュ通知 ─────────────────────────────────────────────────
 const VAPID_PUBLIC_KEY = "BOf1p13V-69m8Qx-9mfjEYRWcsnBQZQt8W7AulVwK4lVK3dzRhWUkIRzWEaSn2acpjAjNU6x_lnChrbgkJh5OFw";
 
 async function subscribePush() {
@@ -22,7 +89,7 @@ async function subscribePush() {
   return sub;
 }
 
-// ─── GAS URL設定 ────────────────────────────────────────────────
+// ─── GAS ────────────────────────────────────────────────────────
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxZOQkI6I7WdtuJpYYJgRDerxsylJU8F66FPL_yJC71g234e7sEuIPa1e12pV87Zk0m/exec";
 
 function gasPost(body) {
@@ -31,6 +98,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
+// ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
 const SLEEP_SK = "bt_sleep";
 const REM_SK = "bt_reminders";
@@ -122,9 +190,10 @@ function useTick(active) {
 }
 
 export default function BabyTracker() {
-  const [records, setRecords] = useState(()=>{ try{return JSON.parse(localStorage.getItem(SK)||"[]")}catch{return[]} });
-  const [sleep, setSleep]     = useState(()=>{ try{return JSON.parse(localStorage.getItem(SLEEP_SK)||"[]")}catch{return[]} });
+  const [records, setRecords] = useState([]);
+  const [sleep, setSleep]     = useState([]);
   const [reminders, setRem]   = useState(()=>{ try{return JSON.parse(localStorage.getItem(REM_SK)||"{}")}catch{return{}} });
+  const [loading, setLoading] = useState(true);
   const [view, setView]       = useState("home");
   const [mlModal, setMlModal] = useState(null);
   const [valModal, setValModal]= useState(null);
@@ -146,13 +215,51 @@ export default function BabyTracker() {
   const isSleeping = sleep.find(s=>!s.end)||null;
   useTick(!!isSleeping);
 
-  useEffect(() => {
+  // 初回ロード：Supabaseから取得
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);
+      const [recs, slps] = await Promise.all([loadRecords(), loadSleep()]);
+      if(recs.length > 0) {
+        setRecords(recs.map(r=>({
+          id: r.id, key: r.key, timestamp: r.timestamp,
+          label: r.label, ml: r.ml, value: r.value, unit: r.unit, note: r.note,
+        })));
+      } else {
+        // Supabaseが空ならlocalStorageから移行
+        const local = JSON.parse(localStorage.getItem(SK)||"[]");
+        setRecords(local);
+      }
+      if(slps.length > 0) {
+        setSleep(slps);
+      } else {
+        const local = JSON.parse(localStorage.getItem(SLEEP_SK)||"[]");
+        setSleep(local);
+      }
+      setLoading(false);
+    })();
+  },[]);
+
+  // 30秒ごとに最新データを取得（他デバイスの更新を反映）
+  useEffect(()=>{
+    const id = setInterval(async()=>{
+      const [recs, slps] = await Promise.all([loadRecords(), loadSleep()]);
+      if(recs.length >= 0) {
+        setRecords(recs.map(r=>({
+          id: r.id, key: r.key, timestamp: r.timestamp,
+          label: r.label, ml: r.ml, value: r.value, unit: r.unit, note: r.note,
+        })));
+      }
+      if(slps.length >= 0) setSleep(slps);
+    }, 30000);
+    return()=>clearInterval(id);
+  },[]);
+
+  useEffect(()=>{ localStorage.setItem(REM_SK,JSON.stringify(reminders)); },[reminders]);
+
+  useEffect(()=>{
     subscribePush().catch(e => console.log('Push subscribe error:', e));
   }, []);
-
-  useEffect(()=>{ localStorage.setItem(SK,JSON.stringify(records)); },[records]);
-  useEffect(()=>{ localStorage.setItem(SLEEP_SK,JSON.stringify(sleep)); },[sleep]);
-  useEffect(()=>{ localStorage.setItem(REM_SK,JSON.stringify(reminders)); },[reminders]);
 
   useEffect(()=>{
     const check=()=>{
@@ -173,16 +280,20 @@ export default function BabyTracker() {
 
   const flash = (k) => { setJustDone(k); setTimeout(()=>setJustDone(null),1200); };
 
-  const addRecord = useCallback((key,extra={},ts=Date.now())=>{
+  const addRecord = useCallback(async(key,extra={},ts=Date.now())=>{
     const rec = {id:Date.now()+Math.random(),key,timestamp:ts,...extra};
     setRecords(prev=>[rec,...prev].slice(0,1000));
     flash(key);
     const it = itemByKey(key);
-    gasPost({ action:"add", record:{ ...rec, label:it.label, unit:extra.unit||"" } });
+    const recWithLabel = { ...rec, label: it.label };
+    // Supabase & GAS に並行送信
+    await upsertRecord(recWithLabel);
+    gasPost({ action:"add", record:{ ...recWithLabel, unit:extra.unit||"" } });
   },[]);
 
-  const delRecord = (id) => {
+  const delRecord = async(id) => {
     setRecords(prev=>prev.filter(r=>r.id!==id));
+    await deleteRecord(id);
     gasPost({ action:"delete", id });
   };
 
@@ -200,28 +311,33 @@ export default function BabyTracker() {
     setValModal(null); setValInput("");
   };
 
-  const startSleep = (ts=Date.now()) => {
+  const startSleep = async(ts=Date.now()) => {
     if(isSleeping) return;
     const s = {id:Date.now(),start:ts,end:null};
     setSleep(prev=>[s,...prev]);
     flash("sleep");
+    await upsertSleep(s);
     gasPost({ action:"addSleep", session:s });
   };
-  const endSleep = (ts=Date.now()) => {
+  const endSleep = async(ts=Date.now()) => {
     if(!isSleeping) return;
-    setSleep(prev=>prev.map(s=>!s.end?{...s,end:ts}:s));
+    const updated = {...isSleeping, end:ts};
+    setSleep(prev=>prev.map(s=>!s.end?updated:s));
     flash("wake");
-    gasPost({ action:"updateSleep", session:{...isSleeping,end:ts} });
+    await upsertSleep(updated);
+    gasPost({ action:"updateSleep", session:updated });
   };
-  const delSleep = (id) => {
+  const delSleep = async(id) => {
     setSleep(prev=>prev.filter(s=>s.id!==id));
+    await deleteSleepDb(id);
     gasPost({ action:"deleteSleep", id });
   };
-  const addSleepManual=()=>{
+  const addSleepManual=async()=>{
     if(!smStart) return;
-    const start=new Date(smStart).getTime(), end=smEnd?new Date(smEnd).getTime():null;
-    setSleep(prev=>[{id:Date.now(),start,end},...prev]);
+    const s = {id:Date.now(),start:new Date(smStart).getTime(),end:smEnd?new Date(smEnd).getTime():null};
+    setSleep(prev=>[s,...prev]);
     setSleepManual(false); setSmStart(""); setSmEnd("");
+    await upsertSleep(s);
   };
   const submitManual=()=>{
     if(!manualKey||!manualTime) return;
@@ -248,6 +364,13 @@ export default function BabyTracker() {
   ].sort((a,b)=>b.timestamp-a.timestamp);
   const groupedAll=groupByDate(allItems);
   const SLEEP_C="#7C6FCD";
+
+  if(loading) return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#FAFAF8",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:40}}>🍼</div>
+      <div style={{fontSize:16,color:"#888"}}>データを読み込み中...</div>
+    </div>
+  );
 
   return (
     <div style={st.app}>
@@ -424,12 +547,11 @@ export default function BabyTracker() {
                 </div>
               );
             })}
-            {/* ── 通知許可ボタン ── */}
             <div style={{background:"#F0EEFF",border:"1px solid #7C6FCD",borderRadius:12,padding:14,display:"flex",flexDirection:"column",gap:8}}>
               <h3 style={{margin:0,fontSize:13,color:"#7C6FCD"}}>プッシュ通知</h3>
-              <p style={{margin:0,fontSize:12,color:"#888"}}>タップして通知を許可すると、リマインダーがスマホに届きます</p>
+              <p style={{margin:0,fontSize:12,color:"#888"}}>タップして通知を許可するとリマインダーがスマホに届きます</p>
               <button
-                onClick={()=>subscribePush().then(()=>alert("通知を許可しました！")).catch(()=>alert("通知の許可に失敗しました。ホーム画面から起動しているか確認してください"))}
+                onClick={()=>subscribePush().then(()=>alert("通知を許可しました！")).catch(()=>alert("通知の許可に失敗しました"))}
                 style={{background:"#7C6FCD",color:"white",border:"none",borderRadius:10,padding:12,fontSize:14,fontWeight:700,cursor:"pointer"}}>
                 🔔 通知を許可する
               </button>
@@ -620,8 +742,7 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
                 {tabItemDefs.filter(ti=>ti.dot).map(ti=>records.filter(r=>r.key===ti.key).map(r=>{
                   const di=days.findIndex(d=>d.toDateString()===new Date(r.timestamp).toDateString());
                   if(di<0) return null;
-                  const y=timeToY(r.timestamp);
-                  return <div key={r.id} style={{position:"absolute",left:di*COL_W+COL_W/2-5,top:y-5,width:10,height:10,borderRadius:"50%",background:ti.color,border:"1.5px solid white",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>;
+                  return <div key={r.id} style={{position:"absolute",left:di*COL_W+COL_W/2-5,top:timeToY(r.timestamp)-5,width:10,height:10,borderRadius:"50%",background:ti.color,border:"1.5px solid white",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}/>;
                 }))}
               </div>
             </div>
