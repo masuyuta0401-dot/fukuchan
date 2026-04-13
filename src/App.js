@@ -1,6 +1,26 @@
 import { useState, useEffect, useCallback } from "react";
 
-// ─── GAS URL設定（PHASE 3でURLを取得したら置き換える）────────────
+// ─── プッシュ通知購読 ─────────────────────────────────────────────
+const VAPID_PUBLIC_KEY = "BOf1p13V-69m8Qx-9mfjEYRWcsnBQZQt8W7AulVwK4lVK3dzRhWUkIRzWEaSn2acpjAjNU6x_lnChrbgkJh5OFw";
+
+async function subscribePush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  const reg = await navigator.serviceWorker.ready;
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) return existing;
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: VAPID_PUBLIC_KEY,
+  });
+  await fetch('/api/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sub),
+  });
+  return sub;
+}
+
+// ─── GAS URL設定 ────────────────────────────────────────────────
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxZOQkI6I7WdtuJpYYJgRDerxsylJU8F66FPL_yJC71g234e7sEuIPa1e12pV87Zk0m/exec";
 
 function gasPost(body) {
@@ -110,9 +130,9 @@ export default function BabyTracker() {
   const [sleep, setSleep]     = useState(()=>{ try{return JSON.parse(localStorage.getItem(SLEEP_SK)||"[]")}catch{return[]} });
   const [reminders, setRem]   = useState(()=>{ try{return JSON.parse(localStorage.getItem(REM_SK)||"{}")}catch{return{}} });
 
-  const [view, setView]       = useState("home"); // home | history | summary | settings
-  const [mlModal, setMlModal] = useState(null);   // { key, label }  → show ml picker
-  const [valModal, setValModal]= useState(null);  // { key, unit, placeholder }
+  const [view, setView]       = useState("home");
+  const [mlModal, setMlModal] = useState(null);
+  const [valModal, setValModal]= useState(null);
   const [valInput, setValInput]= useState("");
   const [manualOpen, setManualOpen] = useState(false);
   const [manualKey,  setManualKey]  = useState(null);
@@ -128,9 +148,13 @@ export default function BabyTracker() {
   const [otherModal, setOtherModal] = useState(false);
   const [otherText,  setOtherText]  = useState("");
 
-
   const isSleeping = sleep.find(s=>!s.end)||null;
   useTick(!!isSleeping);
+
+  // プッシュ通知購読
+  useEffect(() => {
+    subscribePush().catch(e => console.log('Push subscribe error:', e));
+  }, []);
 
   useEffect(()=>{ localStorage.setItem(SK,JSON.stringify(records)); },[records]);
   useEffect(()=>{ localStorage.setItem(SLEEP_SK,JSON.stringify(sleep)); },[sleep]);
@@ -160,7 +184,6 @@ export default function BabyTracker() {
     const rec = {id:Date.now()+Math.random(),key,timestamp:ts,...extra};
     setRecords(prev=>[rec,...prev].slice(0,1000));
     flash(key);
-    // GASに送信
     const it = itemByKey(key);
     gasPost({ action:"add", record:{ ...rec, label:it.label, unit:extra.unit||"" } });
   },[]);
@@ -170,7 +193,6 @@ export default function BabyTracker() {
     gasPost({ action:"delete", id });
   };
 
-  // タップ処理
   const handleTap = (item) => {
     if(item.key==="other") { setOtherModal(true); setOtherText(""); return; }
     if(item.hasMl) { setMlModal(item); return; }
@@ -178,20 +200,17 @@ export default function BabyTracker() {
     addRecord(item.key);
   };
 
-  // ml確定
   const confirmMl = (ml) => {
     addRecord(mlModal.key,{ml});
     setMlModal(null);
   };
 
-  // 数値確定
   const confirmVal = () => {
     if(!valInput) { setValModal(null); return; }
     addRecord(valModal.key,{value:valInput,unit:valModal.unit});
     setValModal(null); setValInput("");
   };
 
-  // 睡眠
   const startSleep = (ts=Date.now()) => {
     if(isSleeping) return;
     const s = {id:Date.now(),start:ts,end:null};
@@ -216,7 +235,6 @@ export default function BabyTracker() {
     setSleepManual(false); setSmStart(""); setSmEnd("");
   };
 
-  // 手動記録確定
   const submitManual=()=>{
     if(!manualKey||!manualTime) return;
     const ts=new Date(manualTime).getTime();
@@ -228,14 +246,10 @@ export default function BabyTracker() {
     setManualOpen(false); setManualKey(null); setManualTime(""); setManualMl(null); setManualVal(""); setManualNote("");
   };
 
-  // 統計ヘルパー
   const todayCount = (key)=>records.filter(r=>r.key===key&&new Date(r.timestamp).toDateString()===todayStr()).length;
   const lastOf     = (key)=>records.find(r=>r.key===key);
   const todaySleepMs=sleep.filter(s=>s.end&&new Date(s.start).toDateString()===todayStr()).reduce((a,s)=>a+(s.end-s.start),0);
 
-
-
-  // 履歴統合
   const allItems=[
     ...records.map(r=>({...r,itemType:"record"})),
     ...sleep.flatMap(s=>{
@@ -250,7 +264,6 @@ export default function BabyTracker() {
 
   return (
     <div style={st.app}>
-      {/* アラート */}
       {Object.keys(alerts).length>0&&(
         <div style={st.alertBar}>
           {Object.entries(alerts).map(([k,m])=>{
@@ -260,7 +273,6 @@ export default function BabyTracker() {
         </div>
       )}
 
-      {/* ヘッダー */}
       <header style={st.header}>
         <div style={st.headerIn}>
           <span style={st.logo}>🍼 ふくちゃん</span>
@@ -275,12 +287,8 @@ export default function BabyTracker() {
       </header>
 
       <main style={st.main}>
-
-        {/* ══ HOME ══ */}
         {view==="home"&&(
           <div style={st.section}>
-
-            {/* 睡眠カード */}
             <div style={{...st.sleepCard,borderColor:SLEEP_C,background:"#F0EEFF"}}>
               <div style={st.sleepTop}>
                 <span style={{fontSize:30}}>{isSleeping?"😴":"☀️"}</span>
@@ -299,7 +307,6 @@ export default function BabyTracker() {
               </div>
             </div>
 
-            {/* カテゴリ別ボタン群 */}
             {Object.entries(CATS).map(([catKey,cat])=>(
               <div key={catKey} style={st.catBlock}>
                 <div style={{...st.catLabel,color:cat.color}}>{cat.label}</div>
@@ -328,7 +335,6 @@ export default function BabyTracker() {
               </div>
             ))}
 
-            {/* 手動記録 */}
             <button onClick={()=>setManualOpen(v=>!v)} style={st.manualToggle}>✏️ 時刻を指定して記録</button>
             {manualOpen&&(
               <div style={st.manualCard}>
@@ -357,7 +363,6 @@ export default function BabyTracker() {
               </div>
             )}
 
-            {/* 睡眠手動 */}
             <button onClick={()=>setSleepManual(v=>!v)} style={st.manualToggle}>✏️ 睡眠を時刻指定で記録</button>
             {sleepManual&&(
               <div style={st.manualCard}>
@@ -371,7 +376,6 @@ export default function BabyTracker() {
           </div>
         )}
 
-        {/* ══ HISTORY ══ */}
         {view==="history"&&(
           <div style={st.section}>
             <h2 style={st.secTitle}>記録履歴</h2>
@@ -426,18 +430,16 @@ export default function BabyTracker() {
           </div>
         )}
 
-        {/* ══ SUMMARY ══ */}
         {view==="summary"&&(
           <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} />
         )}
 
-        {/* ══ SETTINGS ══ */}
         {view==="settings"&&(
           <div style={st.section}>
             <h2 style={st.secTitle}>リマインダー設定</h2>
-            <p style={{fontSize:13,color:"#888",margin:0}}>0 = 無効　最後の記録から指定時間後にアラート</p>
+            <p style={{fontSize:13,color:"#888",margin:0}}>最後の記録から指定時間後にアラート</p>
             {ALL_ITEMS.slice(0,7).map(it=>{
-              const hrs = Math.round((reminders[it.key]||0)/60*10)/10; // 分→時間
+              const hrs = Math.round((reminders[it.key]||0)/60*10)/10;
               return (
               <div key={it.key} style={st.settingRow}>
                 <span style={{fontSize:14,fontWeight:600}}>{it.emoji} {it.label}</span>
@@ -460,16 +462,13 @@ export default function BabyTracker() {
         )}
       </main>
 
-      {/* ═══ ml選択モーダル ═══ */}
       {mlModal&&(
         <div style={st.overlay} onClick={()=>setMlModal(null)}>
           <div style={st.modal} onClick={e=>e.stopPropagation()}>
             <div style={st.modalTitle}>{mlModal.emoji} {mlModal.label}</div>
             <div style={st.mlList}>
               {ML_OPTIONS.map(ml=>(
-                <button key={ml} onClick={()=>confirmMl(ml)} style={st.mlItem}>
-                  {ml}ml
-                </button>
+                <button key={ml} onClick={()=>confirmMl(ml)} style={st.mlItem}>{ml}ml</button>
               ))}
             </div>
             <button onClick={()=>setMlModal(null)} style={st.cancelBtn}>キャンセル</button>
@@ -477,7 +476,6 @@ export default function BabyTracker() {
         </div>
       )}
 
-      {/* ═══ 数値入力モーダル ═══ */}
       {valModal&&(
         <div style={st.overlay} onClick={()=>setValModal(null)}>
           <div style={{...st.modal,gap:12}} onClick={e=>e.stopPropagation()}>
@@ -491,7 +489,6 @@ export default function BabyTracker() {
         </div>
       )}
 
-      {/* ═══ その他モーダル ═══ */}
       {otherModal&&(
         <div style={st.overlay} onClick={()=>setOtherModal(false)}>
           <div style={{...st.modal,gap:12}} onClick={e=>e.stopPropagation()}>
@@ -529,24 +526,20 @@ const st = {
   navActive:{ background:"#EEEAE4", color:"#2D2D2D" },
   main:     { maxWidth:520, margin:"0 auto", padding:14 },
   section:  { display:"flex", flexDirection:"column", gap:14 },
-
   sleepCard:{ border:"2px solid", borderRadius:16, padding:14, display:"flex", flexDirection:"column", gap:10 },
   sleepTop: { display:"flex", alignItems:"center", gap:12 },
   sleepBtns:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 },
   sleepBtn: { border:"none", borderRadius:12, padding:12, fontSize:14, fontWeight:700, cursor:"pointer", color:"white", transition:"all .15s" },
-
   catBlock: { background:"white", border:"1px solid #EBEBEB", borderRadius:14, padding:12, display:"flex", flexDirection:"column", gap:8 },
   catLabel: { fontSize:12, fontWeight:700, letterSpacing:.5 },
   catGrid:  { display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 },
   itemBtn:  { border:"1.5px solid", borderRadius:12, padding:"10px 4px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:2, transition:"all .15s", background:"white" },
-
   manualToggle:{ background:"none", border:"1px dashed #CCC", borderRadius:10, padding:10, fontSize:13, color:"#888", cursor:"pointer", width:"100%" },
   manualCard:  { background:"white", border:"1px solid #E8E8E8", borderRadius:14, padding:14, display:"flex", flexDirection:"column", gap:10 },
   chipBtn:     { padding:"6px 10px", border:"1.5px solid #DDD", borderRadius:20, background:"white", cursor:"pointer", fontSize:12, fontWeight:600 },
   input:       { width:"100%", padding:"10px 12px", border:"1.5px solid #E0E0E0", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit" },
   inputLabel:  { fontSize:12, fontWeight:600, color:"#777" },
   submitBtn:   { background:"#2D2D2D", color:"white", border:"none", borderRadius:10, padding:12, fontSize:15, fontWeight:700, cursor:"pointer" },
-
   secTitle:  { fontSize:17, fontWeight:700, margin:0 },
   empty:     { color:"#AAA", textAlign:"center", padding:32 },
   dateGroup: { display:"flex", flexDirection:"column", gap:6 },
@@ -556,20 +549,9 @@ const st = {
   rowTime:   { fontSize:12, color:"#888", whiteSpace:"nowrap" },
   delBtn:    { background:"none", border:"none", color:"#CCC", cursor:"pointer", fontSize:16, padding:4 },
   badge:     { marginLeft:6, fontSize:11, background:"#F0F0F0", borderRadius:6, padding:"1px 6px", color:"#555" },
-
-  tabRow:    { display:"flex", gap:6 },
-  tabBtn:    { flex:1, padding:"8px 4px", border:"1.5px solid #DDD", borderRadius:10, background:"white", cursor:"pointer", fontSize:12, fontWeight:600, color:"#888" },
-  tabActive: { background:"#2D2D2D", color:"white", borderColor:"#2D2D2D" },
-  chartNote: { margin:0, fontSize:12, color:"#888" },
-  legendRow: { display:"flex", gap:8, flexWrap:"wrap" },
-  legend:    { fontSize:11, padding:"3px 10px", borderRadius:20, color:"white", fontWeight:600 },
-  summaryGrid:{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 },
-  summaryCard:{ border:"2px solid", borderRadius:12, padding:"10px 8px", display:"flex", flexDirection:"column", alignItems:"center", gap:2, background:"white" },
-
   settingRow:{ background:"white", border:"1px solid #EEE", borderRadius:12, padding:14, display:"flex", flexDirection:"column", gap:8 },
   dangerZone:{ background:"#FFF5F5", border:"1px solid #FFE0E0", borderRadius:12, padding:14, display:"flex", flexDirection:"column", gap:8 },
   dangerBtn: { background:"white", border:"1.5px solid #E74C3C", borderRadius:10, padding:10, color:"#E74C3C", fontSize:13, fontWeight:600, cursor:"pointer" },
-
   overlay:   { position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:50, display:"flex", alignItems:"flex-end", justifyContent:"center" },
   modal:     { background:"white", borderRadius:"20px 20px 0 0", width:"100%", maxWidth:520, maxHeight:"70vh", overflow:"auto", padding:20, display:"flex", flexDirection:"column", gap:0 },
   modalTitle:{ fontSize:18, fontWeight:700, textAlign:"center", padding:"8px 0 12px" },
@@ -579,7 +561,6 @@ const st = {
 };
 
 // ─── SummaryView ─────────────────────────────────────────────────
-// スクショ準拠: 上部タブ（食事/睡眠/排泄/体温）+ 時間軸グリッド + 量切り替え
 const SUMMARY_TABS = [
   { key:"nursing",   label:"食事" },
   { key:"sleep",     label:"睡眠" },
@@ -588,7 +569,6 @@ const SUMMARY_TABS = [
   { key:"all",       label:"すべて" },
 ];
 
-// 各タブで表示するアイテム定義
 const TAB_ITEMS = {
   nursing:   [
     { key:"breastfeed", label:"母乳",  color:"#F08080", dot:true },
@@ -622,15 +602,14 @@ function get7Days() {
 
 function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C }) {
   const [tab,  setTab]  = useState("nursing");
-  const [mode, setMode] = useState("time"); // time | amount
+  const [mode, setMode] = useState("time");
 
   const days   = get7Days();
   const today  = new Date().toDateString();
-  const HOUR_H = 18; // px per hour  →  total 24*18 = 432px
-  const COL_W  = 44; // px per day column
-  const LEFT_W = 28; // time axis width
+  const HOUR_H = 18;
+  const COL_W  = 44;
+  const LEFT_W = 28;
 
-  // 量モード: 日別集計
   const amountData = days.map(d=>{
     const ds = d.toDateString();
     const label = `${d.getMonth()+1}/${d.getDate()}`;
@@ -652,20 +631,15 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
   })();
   const BAR_MAX_H = 100;
 
-  // 時間軸モード: 各recordをy座標に変換
   const timeToY = (ts) => {
     const d=new Date(ts);
     return (d.getHours()+(d.getMinutes()/60))*HOUR_H;
   };
 
-  // 今日の数字まとめ
-  const todayMilk = records.filter(r=>r.key==="milk"&&new Date(r.timestamp).toDateString()===today).reduce((a,r)=>a+(r.ml||0),0);
-
   const tabItemDefs = TAB_ITEMS[tab] || [];
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0,background:"#FAFAF8",minHeight:"100%"}}>
-      {/* タブ行 */}
       <div style={{display:"flex",overflowX:"auto",borderBottom:"1px solid #E0E0E0",background:"white",position:"sticky",top:52,zIndex:10}}>
         {SUMMARY_TABS.map(t=>(
           <button key={t.key} onClick={()=>setTab(t.key)} style={{
@@ -677,7 +651,6 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
         ))}
       </div>
 
-      {/* 時間/量 切り替え */}
       <div style={{display:"flex",margin:"10px 14px 6px",background:"#F0F0F0",borderRadius:20,padding:3}}>
         {[["time","時間"],["amount","量"]].map(([k,l])=>(
           <button key={k} onClick={()=>setMode(k)} style={{
@@ -689,10 +662,8 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
         ))}
       </div>
 
-      {/* ── 時間軸グリッド ── */}
       {mode==="time"&&(
         <div style={{margin:"0 14px",background:"white",border:"1px solid #E8E8E8",borderRadius:12,overflow:"hidden"}}>
-          {/* 日付ヘッダー */}
           <div style={{display:"flex",borderBottom:"1px solid #E8E8E8"}}>
             <div style={{width:LEFT_W,flexShrink:0}}/>
             {days.map((d,i)=>{
@@ -706,10 +677,7 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
               );
             })}
           </div>
-
-          {/* グリッド本体 */}
           <div style={{position:"relative",overflowY:"auto",maxHeight:420}}>
-            {/* 横線 + 時刻ラベル */}
             <div style={{display:"flex",pointerEvents:"none"}}>
               <div style={{width:LEFT_W,flexShrink:0,position:"relative",height:24*HOUR_H}}>
                 {[0,3,6,9,12,15,18,21].map(h=>(
@@ -717,23 +685,18 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
                 ))}
               </div>
               <div style={{flex:1,position:"relative",height:24*HOUR_H}}>
-                {/* 列背景（今日のみ薄ピンク） */}
                 {days.map((d,i)=>{
                   const isT=d.toDateString()===today;
                   return isT?(
                     <div key={i} style={{position:"absolute",left:i*COL_W,top:0,width:COL_W,height:24*HOUR_H,background:"rgba(255,180,180,.12)"}}/>
                   ):null;
                 })}
-                {/* 横破線 */}
                 {[0,3,6,9,12,15,18,21,24].map(h=>(
                   <div key={h} style={{position:"absolute",left:0,right:0,top:h*HOUR_H,borderTop:h%6===0?"1px solid #DDD":"1px dashed #EBEBEB"}}/>
                 ))}
-                {/* 縦区切り */}
                 {days.map((_,i)=>(
                   <div key={i} style={{position:"absolute",left:i*COL_W,top:0,bottom:0,borderLeft:"1px solid #EBEBEB"}}/>
                 ))}
-
-                {/* 睡眠バー */}
                 {(tab==="sleep"||tab==="all")&&sleep.filter(s=>s.end).map(s=>{
                   const ds=new Date(s.start).toDateString();
                   const di=days.findIndex(d=>d.toDateString()===ds);
@@ -748,8 +711,6 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
                     }}/>
                   );
                 })}
-
-                {/* ドット（授乳・排泄・etc） */}
                 {tabItemDefs.filter(ti=>ti.dot).map(ti=>(
                   records.filter(r=>r.key===ti.key).map(r=>{
                     const ds=new Date(r.timestamp).toDateString();
@@ -770,8 +731,6 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
               </div>
             </div>
           </div>
-
-          {/* 凡例 */}
           <div style={{padding:"8px 10px",borderTop:"1px solid #F0F0F0",display:"flex",gap:10,flexWrap:"wrap"}}>
             {tabItemDefs.map(ti=>(
               <span key={ti.key} style={{display:"flex",alignItems:"center",gap:4,fontSize:11,color:"#555"}}>
@@ -783,11 +742,9 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
         </div>
       )}
 
-      {/* ── 量グラフ ── */}
       {mode==="amount"&&(
         <div style={{margin:"0 14px",display:"flex",flexDirection:"column",gap:12}}>
           <div style={{background:"white",border:"1px solid #E8E8E8",borderRadius:12,overflow:"hidden"}}>
-            {/* 日付ヘッダー */}
             <div style={{display:"flex",borderBottom:"1px solid #E8E8E8"}}>
               <div style={{width:LEFT_W,flexShrink:0}}/>
               {days.map((d,i)=>{
@@ -800,8 +757,6 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
                 );
               })}
             </div>
-
-            {/* バーエリア */}
             <div style={{display:"flex",alignItems:"flex-end",height:BAR_MAX_H+16,padding:"8px 0 4px",borderBottom:"1px solid #F0F0F0",position:"relative"}}>
               <div style={{width:LEFT_W,flexShrink:0}}/>
               {amountData.map((d,i)=>{
@@ -810,22 +765,18 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
                            : tab==="sleep"    ? [{v:d.slpMin,c:SLEEP_C}]
                            : tab==="health"   ? [{v:d.temp??0,c:"#FF8C8C"}]
                            : [{v:d.milk,c:"#F4A261"}];
-                const maxV = Math.max(...vals.map(v=>v.v),1);
                 return(
                   <div key={i} style={{width:COL_W,flexShrink:0,display:"flex",justifyContent:"center",alignItems:"flex-end",gap:2,height:BAR_MAX_H}}>
                     {vals.map((v,j)=>{
                       const h=Math.round((v.v/maxVal)*BAR_MAX_H);
                       return h>0?(
-                        <div key={j} style={{width:12,height:h,background:v.c,borderRadius:"3px 3px 0 0",
-                          opacity:d.isToday?1:.75}}/>
+                        <div key={j} style={{width:12,height:h,background:v.c,borderRadius:"3px 3px 0 0",opacity:d.isToday?1:.75}}/>
                       ):<div key={j} style={{width:12,height:2,background:"#EEE",borderRadius:2}}/>;
                     })}
                   </div>
                 );
               })}
             </div>
-
-            {/* 数値ラベル */}
             <div style={{display:"flex"}}>
               <div style={{width:LEFT_W,flexShrink:0}}/>
               {amountData.map((d,i)=>{
@@ -843,8 +794,6 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
               })}
             </div>
           </div>
-
-          {/* 今日のサマリーカード */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,paddingBottom:8}}>
             {[
               {label:"ミルク", value:`${amountData[6].milk}ml`, color:"#F4A261"},
