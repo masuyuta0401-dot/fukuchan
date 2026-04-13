@@ -5,6 +5,9 @@ const VAPID_PUBLIC_KEY = "BOf1p13V-69m8Qx-9mfjEYRWcsnBQZQt8W7AulVwK4lVK3dzRhWUkI
 
 async function subscribePush() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  // 通知許可をリクエスト
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return;
   const reg = await navigator.serviceWorker.ready;
   const existing = await reg.pushManager.getSubscription();
   if (existing) return existing;
