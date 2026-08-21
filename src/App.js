@@ -132,7 +132,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v3.1";
+const APP_VERSION = "v3.3";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -566,16 +566,16 @@ export default function BabyTracker() {
         </div>
       )}
       <header style={st.header}>
-        <div style={{...st.headerIn,maxWidth:wide?"none":520,padding:wide?"12px 20px":"10px 14px"}}>
-          <span style={{...st.logo,fontSize:wide?24:18}}>🐥 千隼 <span style={{fontSize:11,color:"rgba(255,255,255,.75)",fontWeight:500}}>{APP_VERSION}</span></span>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <nav style={st.nav}>
+        <div style={{...st.headerIn,maxWidth:wide?"none":520,padding:wide?"20px 28px":"12px 14px"}}>
+          <span style={{...st.logo,fontSize:wide?34:22,fontFamily:"'Hiragino Maru Gothic ProN','Hiragino Sans','Noto Sans JP',sans-serif"}}>🐥 千隼くん <span style={{fontSize:12,color:"rgba(255,255,255,.75)",fontWeight:500}}>{APP_VERSION}</span></span>
+          <div style={{display:"flex",alignItems:"center",gap:wide?14:6}}>
+            <nav style={{...st.nav,padding:wide?4:3}}>
               {[["home","🍼 記録"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
-                <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,fontSize:wide?15:12,padding:wide?"7px 14px":"5px 9px",...(view===v?st.navActive:{})}}>{l}</button>
+                <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,fontSize:wide?19:13,padding:wide?"11px 20px":"6px 11px",...(view===v?st.navActive:{})}}>{l}</button>
               ))}
             </nav>
             <button onClick={()=>setOpModal(true)} title="操作者を切り替え"
-              style={{...st.opBtn, background:"white", borderColor:"white", color:curOp.color, fontSize:wide?15:11, padding:wide?"8px 16px":"5px 10px"}}>
+              style={{...st.opBtn, background:"white", borderColor:"white", color:curOp.color, fontSize:wide?19:12, padding:wide?"11px 20px":"6px 12px"}}>
               {curOp.emoji} {curOp.label}
             </button>
           </div>
@@ -1185,7 +1185,7 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0,background:"transparent",minHeight:"100%"}}>
-      <div style={{display:"flex",overflowX:"auto",borderBottom:"1px solid #E0E0E0",background:"white",position:"sticky",top:wide?64:52,zIndex:10,borderRadius:wide?12:0}}>
+      <div style={{display:"flex",overflowX:"auto",borderBottom:"1px solid #E0E0E0",background:"white",position:"sticky",top:wide?92:58,zIndex:10,borderRadius:wide?12:0}}>
         {SUMMARY_TABS.map(t=>(
           <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:"0 0 auto",padding:"10px 16px",border:"none",
             borderBottom:tab===t.key?"2.5px solid #4A90D9":"2.5px solid transparent",background:"transparent",
