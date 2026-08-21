@@ -101,26 +101,51 @@ async function saveMemoDb(memo) {
   });
 }
 
+// ─── 家族共有の設定（リマインダー・通知先） ───────────────────────
+async function loadSettings() {
+  const data = await sbFetch("settings?id=eq.family", { headers: { "Prefer": "" } });
+  return data && data[0] ? data[0] : null;
+}
+async function saveSettingsDb(patch) {
+  await sbFetch("settings?id=eq.family", {
+    method: "PATCH",
+    body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }),
+  });
+}
+
 // ─── プッシュ通知 ─────────────────────────────────────────────────
 const VAPID_PUBLIC_KEY = "BOf1p13V-69m8Qx-9mfjEYRWcsnBQZQt8W7AulVwK4lVK3dzRhWUkIRzWEaSn2acpjAjNU6x_lnChrbgkJh5OFw";
 
-async function subscribePush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') return;
+async function subscribePush(operator, { ask = true } = {}) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  if (Notification.permission !== 'granted') {
+    if (!ask) return null;
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return null;
+  }
   const reg = await navigator.serviceWorker.ready;
-  const existing = await reg.pushManager.getSubscription();
-  if (existing) return existing;
-  const sub = await reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: VAPID_PUBLIC_KEY,
-  });
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: VAPID_PUBLIC_KEY });
+  }
+  // 操作者名と紐づけて保存（操作者を切り替えた場合も再登録）
   await fetch('/api/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(sub),
+    body: JSON.stringify({ operator: operator || 'unknown', subscription: sub }),
   });
   return sub;
+}
+
+async function sendPush({ to, title, body, dedupeKey, ttl }) {
+  try {
+    const r = await fetch('/api/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, title, body, dedupeKey, ttl }),
+    });
+    return await r.json();
+  } catch (e) { console.log('push error', e); return null; }
 }
 
 // ─── GAS ────────────────────────────────────────────────────────
@@ -132,7 +157,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v3.6";
+const APP_VERSION = "v3.8";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -301,7 +326,16 @@ export default function BabyTracker() {
   useGlobalStyle();
   const [records, setRecords] = useState([]);
   const [sleep, setSleep]     = useState([]);
-  const [reminders, setRem]   = useState(()=>{ try{return JSON.parse(localStorage.getItem(REM_SK)||"{}")}catch{return{}} });
+  const [reminders, setRemLocal] = useState(()=>{ try{return JSON.parse(localStorage.getItem(REM_SK)||"{}")}catch{return{}} });
+  const [notifyTargets, setNotifyTargets] = useState([]);
+  const remRef = useRef(reminders); useEffect(()=>{ remRef.current=reminders; },[reminders]);
+  const targetsRef = useRef(notifyTargets); useEffect(()=>{ targetsRef.current=notifyTargets; },[notifyTargets]);
+  const setRem = (updater) => {
+    setRemLocal(prev=>{ const next = typeof updater==="function" ? updater(prev) : updater; saveSettingsDb({ reminders: next }); return next; });
+  };
+  const toggleTarget = (label) => {
+    setNotifyTargets(prev=>{ const next = prev.includes(label) ? prev.filter(x=>x!==label) : [...prev,label]; saveSettingsDb({ notify_targets: next }); return next; });
+  };
   const [loading, setLoading] = useState(true);
   const [view, setView]       = useState("home");
   const [mlModal, setMlModal] = useState(null);
@@ -353,19 +387,11 @@ export default function BabyTracker() {
   useEffect(()=>{
     (async()=>{
       setLoading(true);
-      const [recs, slps, m] = await Promise.all([loadRecords(), loadSleep(), loadMemos()]);
-      if(recs.length > 0) {
-        setRecords(mapRecs(recs));
-      } else {
-        const local = JSON.parse(localStorage.getItem(SK)||"[]");
-        setRecords(local);
-      }
-      if(slps.length > 0) {
-        setSleep(slps);
-      } else {
-        const local = JSON.parse(localStorage.getItem(SLEEP_SK)||"[]");
-        setSleep(local);
-      }
+      const [recs, slps, m, cfg] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings()]);
+      if(cfg){ if(cfg.reminders && Object.keys(cfg.reminders).length) setRemLocal(cfg.reminders); if(Array.isArray(cfg.notify_targets)) setNotifyTargets(cfg.notify_targets); }
+      setRecords(mapRecs(recs));
+      setSleep(slps);
+      localStorage.removeItem(SK); localStorage.removeItem(SLEEP_SK);
       setMemos(m);
       setLoading(false);
     })();
@@ -374,10 +400,11 @@ export default function BabyTracker() {
   // 30秒ごとに最新データを取得（他デバイスの更新を反映）
   useEffect(()=>{
     const id = setInterval(async()=>{
-      const [recs, slps, m] = await Promise.all([loadRecords(), loadSleep(), loadMemos()]);
+      const [recs, slps, m, cfg] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings()]);
       if(recs.length >= 0) setRecords(mapRecs(recs));
       if(slps.length >= 0) setSleep(slps);
       if(!memoEditing) setMemos(m);
+      if(cfg){ if(cfg.reminders) setRemLocal(cfg.reminders); if(Array.isArray(cfg.notify_targets)) setNotifyTargets(cfg.notify_targets); }
     }, 30000);
     return()=>clearInterval(id);
   },[memoEditing]);
@@ -391,8 +418,9 @@ export default function BabyTracker() {
   useEffect(()=>{ localStorage.setItem(REM_SK,JSON.stringify(reminders)); },[reminders]);
 
   useEffect(()=>{
-    subscribePush().catch(e => console.log('Push subscribe error:', e));
-  }, []);
+    if(!operator) return;
+    subscribePush(operator, { ask:false }).catch(e => console.log('Push subscribe error:', e));
+  }, [operator]);
 
   useEffect(()=>{
     const check=()=>{
@@ -402,7 +430,20 @@ export default function BabyTracker() {
         const last=records.filter(r=>r.key===k).sort((a,b)=>b.timestamp-a.timestamp)[0];
         if(!last) return;
         const diff=(Date.now()-last.timestamp)/60000;
-        if(diff>=mins) na[k]=Math.floor(diff);
+        if(diff>=mins){
+          na[k]=Math.floor(diff);
+          const targets = targetsRef.current;
+          if(targets.length){
+            const it = itemByKey(k);
+            sendPush({
+              to: targets,
+              title: `🐥 千隼くん：${it.label}の時間`,
+              body: `前回の${it.label}から${Math.floor(diff/60)>0?`${Math.floor(diff/60)}時間`:""}${Math.floor(diff%60)}分経ちました`,
+              dedupeKey: `${k}:${last.timestamp}`,
+              ttl: Math.max(600, mins*60),
+            });
+          }
+        }
       });
       setAlerts(na);
     };
@@ -528,12 +569,16 @@ export default function BabyTracker() {
     if(!confirm("記録をすべて削除？（全端末から消えます）")) return;
     setRecords([]);
     await sbFetch("records?user_id=eq.family", { method:"DELETE" });
+    const left = await loadRecords(); setRecords(mapRecs(left));
+    if(left.length>0) alert(`削除できなかった記録が${left.length}件あります`);
     addLog(opRef.current, "clear_records", null, null);
   };
   const clearSleep = async() => {
     if(!confirm("睡眠記録をすべて削除？（全端末から消えます）")) return;
     setSleep([]);
     await sbFetch("sleep_sessions?user_id=eq.family", { method:"DELETE" });
+    const left = await loadSleep(); setSleep(left);
+    if(left.length>0) alert(`削除できなかった睡眠記録が${left.length}件あります`);
     addLog(opRef.current, "clear_sleep", null, null);
   };
 
@@ -604,7 +649,7 @@ export default function BabyTracker() {
           <div style={wide?st.homeWide:st.section}>
           <div style={{...st.section,...(wide?{order:2,gap:16,position:"sticky",top:HEADER_H+6,height:rightH,overflow:"hidden"}:{})}}>
             {/* 引き継ぎメモ */}
-            <div style={{...st.memoCard,padding:wide?24:14,gap:wide?14:8,borderWidth:wide?2.5:1.5,...(wide?{flex:1,minHeight:0,overflowY:"auto",boxSizing:"border-box"}:{})}}>
+            <div style={{...st.memoCard,padding:wide?24:14,gap:wide?14:8,borderWidth:wide?2.5:1.5,order:2,...(wide?{flex:1,minHeight:0,overflowY:"auto",boxSizing:"border-box"}:{})}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:wide?26:13,fontWeight:800,color:"#8A6D1F"}}>📝 引き継ぎメモ</span>
                 {!memoEditing&&<button onClick={startMemoEdit} style={{...st.memoEditBtn,fontSize:wide?16:12,padding:wide?"10px 22px":"4px 12px",background:"#8A6D1F",color:"white",borderColor:"#8A6D1F"}}>＋ 新しく書く</button>}
@@ -664,7 +709,7 @@ export default function BabyTracker() {
                 </div>
               ))}
             </div>
-            <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,alignItems:"stretch",flexShrink:0}:{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,alignItems:"stretch",flexShrink:0,order:1}:{display:"flex",flexDirection:"column",gap:14,order:1}}>
             {/* 今日のまとめ */}
             <div style={{background:"white",border:"1px solid #EBEBEB",borderRadius:wide?20:14,padding:wide?20:12,display:"flex",flexDirection:"column",gap:wide?12:8}}>
               <div style={{fontSize:wide?18:13,fontWeight:800,color:"#555"}}>📊 今日のまとめ</div>
@@ -875,7 +920,7 @@ export default function BabyTracker() {
             </div>
 
             <h2 style={st.secTitle}>リマインダー設定</h2>
-            <p style={{fontSize:13,color:"#888",margin:0}}>最後の記録から指定時間後にアラート</p>
+            <p style={{fontSize:wide?15:13,color:"#7A8A95",margin:0}}>最後の記録から指定時間後にアラート＆プッシュ通知（家族で共有）</p>
             {ALL_ITEMS.slice(0,7).map(it=>{
               const hrs = Math.round((reminders[it.key]||0)/60*10)/10;
               return (
@@ -892,14 +937,35 @@ export default function BabyTracker() {
                 </div>
               );
             })}
-            <div style={{background:"#F0EEFF",border:"1px solid #7C6FCD",borderRadius:12,padding:14,display:"flex",flexDirection:"column",gap:8}}>
-              <h3 style={{margin:0,fontSize:13,color:"#7C6FCD"}}>プッシュ通知</h3>
-              <p style={{margin:0,fontSize:12,color:"#888"}}>タップして通知を許可するとリマインダーがスマホに届きます</p>
-              <button
-                onClick={()=>subscribePush().then(()=>alert("通知を許可しました！")).catch(()=>alert("通知の許可に失敗しました"))}
-                style={{background:"#7C6FCD",color:"white",border:"none",borderRadius:10,padding:12,fontSize:14,fontWeight:700,cursor:"pointer"}}>
-                🔔 通知を許可する
-              </button>
+            <div style={{...st.settingRow,background:"#EEF6FC"}}>
+              <h3 style={{margin:0,fontSize:wide?17:14,color:"#3E8FC7"}}>🔔 リマインダーを通知する人</h3>
+              <p style={{margin:0,fontSize:wide?14:12,color:"#7A8A95"}}>ONの人のスマホにだけプッシュ通知が届きます（家族全員で共有の設定）</p>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {OPERATORS.map(o=>{
+                  const on = notifyTargets.includes(o.label);
+                  return (
+                    <button key={o.label} onClick={()=>toggleTarget(o.label)}
+                      style={{border:`3px solid ${o.color}`,background:on?o.color:"white",color:on?"white":o.color,borderRadius:14,padding:wide?"14px 8px":"10px 6px",fontWeight:900,fontSize:wide?17:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                      <span style={{fontSize:wide?26:20}}>{o.emoji}</span>{o.label}<span style={{fontSize:wide?13:11,opacity:.85}}>{on?"ON":"OFF"}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{borderTop:"1px solid #D9E8F2",paddingTop:10,display:"flex",flexDirection:"column",gap:8}}>
+                <p style={{margin:0,fontSize:wide?14:12,color:"#7A8A95"}}>この端末（{curOp.emoji} {curOp.label}）で通知を受け取るには、一度だけ許可が必要です。iPhoneはホーム画面に追加したアイコンから開いて押してください。</p>
+                <div style={{display:"flex",gap:8}}>
+                  <button
+                    onClick={()=>subscribePush(operator).then(s=>alert(s?`${curOp.label}の端末として通知を登録しました`:"通知が許可されませんでした")).catch(()=>alert("通知の登録に失敗しました"))}
+                    style={{...st.submitBtn,flex:1,padding:wide?14:12,fontSize:wide?16:14}}>
+                    🔔 この端末で通知を許可する
+                  </button>
+                  <button
+                    onClick={()=>sendPush({ to:[operator], title:"🐥 千隼くん", body:"テスト通知です。届いていればOK！" }).then(r=>alert(r&&r.sent>0?`${curOp.label}に送信しました（${r.sent}台）`:"送信先がありません。先に「通知を許可する」を押してください"))}
+                    style={{...st.cancelBtn,marginTop:0,padding:wide?14:12,fontSize:wide?16:14}}>
+                    テスト送信
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           <div style={st.section}>
