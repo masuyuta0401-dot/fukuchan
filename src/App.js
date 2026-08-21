@@ -530,22 +530,22 @@ export default function BabyTracker() {
         </div>
       )}
       <header style={st.header}>
-        <div style={{...st.headerIn,maxWidth:wide?1100:520}}>
+        <div style={{...st.headerIn,maxWidth:wide?"none":520,padding:wide?"12px 32px":"10px 14px"}}>
           <span style={st.logo}>🍼 ふくちゃん</span>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             <nav style={st.nav}>
               {[["home","記録"],["history","履歴"],["summary","グラフ"],["settings","設定"]].map(([v,l])=>(
-                <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,...(view===v?st.navActive:{})}}>{l}</button>
+                <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,fontSize:wide?15:12,padding:wide?"7px 14px":"5px 9px",...(view===v?st.navActive:{})}}>{l}</button>
               ))}
             </nav>
             <button onClick={()=>setOpModal(true)} title="操作者を切り替え"
-              style={{...st.opBtn, borderColor:curOp.color, color:curOp.color}}>
+              style={{...st.opBtn, borderColor:curOp.color, color:curOp.color, fontSize:wide?15:11, padding:wide?"7px 16px":"4px 9px"}}>
               {curOp.emoji} {curOp.label}
             </button>
           </div>
         </div>
       </header>
-      <main style={{...st.main,maxWidth:wide?1100:520,padding:wide?"20px 24px":14}}>
+      <main style={{...st.main,maxWidth:wide?"none":520,padding:wide?"24px 32px":14}}>
         {view==="home"&&(
           <div style={wide?st.homeWide:st.section}>
           <div style={{...st.section,...(wide?{position:"sticky",top:72,alignSelf:"start",order:2}:{})}}>
@@ -590,27 +590,27 @@ export default function BabyTracker() {
               </div>
               <div style={st.sleepBtns}>
                 <button onClick={()=>startSleep()} disabled={!!isSleeping}
-                  style={{...st.sleepBtn,background:!isSleeping?SLEEP_C:"#CCC",opacity:isSleeping?.45:1}}>😴 寝た</button>
+                  style={{...st.sleepBtn,padding:wide?18:12,fontSize:wide?18:14,background:!isSleeping?SLEEP_C:"#CCC",opacity:isSleeping?.45:1}}>😴 寝た</button>
                 <button onClick={()=>endSleep()} disabled={!isSleeping}
-                  style={{...st.sleepBtn,background:isSleeping?"#F4A261":"#CCC",opacity:!isSleeping?.45:1}}>☀️ 起きた</button>
+                  style={{...st.sleepBtn,padding:wide?18:12,fontSize:wide?18:14,background:isSleeping?"#F4A261":"#CCC",opacity:!isSleeping?.45:1}}>☀️ 起きた</button>
               </div>
             </div>
           </div>
           <div style={{...st.section,...(wide?{order:1}:{})}}>
             {Object.entries(CATS).map(([catKey,cat])=>(
-              <div key={catKey} style={st.catBlock}>
-                <div style={{...st.catLabel,color:cat.color}}>{cat.label}</div>
-                <div style={{...st.catGrid,gridTemplateColumns:wide?"repeat(5,1fr)":"repeat(4,1fr)",gap:wide?10:8}}>
+              <div key={catKey} style={{...st.catBlock,padding:wide?20:12,borderRadius:wide?20:14}}>
+                <div style={{...st.catLabel,color:cat.color,fontSize:wide?18:12}}>{cat.label}</div>
+                <div style={{...st.catGrid,gridTemplateColumns:wide?"repeat(5,1fr)":"repeat(4,1fr)",gap:wide?16:8}}>
                   {cat.items.map((item)=>{
                     const done=justDone===item.key;
                     return (
                       <button key={item.key} onClick={()=>handleTap(item)}
-                        style={{...st.itemBtn,padding:wide?"14px 6px":"10px 4px",background:done?item.color:"white",borderColor:item.color,
+                        style={{...st.itemBtn,padding:wide?"28px 10px":"10px 4px",borderWidth:wide?2.5:1.5,borderRadius:wide?20:12,background:done?item.color:"white",borderColor:item.color,
                           color:done?"white":item.color,transform:done?"scale(0.94)":"scale(1)"}}>
-                        <span style={{fontSize:wide?28:22}}>{item.emoji}</span>
-                        <span style={{fontSize:wide?13:11,fontWeight:600,marginTop:2}}>{item.label}</span>
-                        {(item.key==="milk"||item.key==="pumped")&&<span style={{fontSize:9,opacity:.6}}>ml選択</span>}
-                        {item.key!=="milk"&&item.key!=="pumped"&&<span style={{fontSize:9,opacity:.5}}>{timeSince(lastOf(item.key)?.timestamp||0)||"未記録"}</span>}
+                        <span style={{fontSize:wide?56:22}}>{item.emoji}</span>
+                        <span style={{fontSize:wide?20:11,fontWeight:700,marginTop:wide?8:2}}>{item.label}</span>
+                        {(item.key==="milk"||item.key==="pumped")&&<span style={{fontSize:wide?13:9,opacity:.6}}>ml選択</span>}
+                        {item.key!=="milk"&&item.key!=="pumped"&&<span style={{fontSize:wide?13:9,opacity:.5}}>{lastOf(item.key)?timeSince(lastOf(item.key).timestamp):"未記録"}</span>}
                       </button>
                     );
                   })}
@@ -810,20 +810,19 @@ export default function BabyTracker() {
       </main>
 
       {showOpModal&&(
-        <div style={st.overlay} onClick={()=>{ if(operator) setOpModal(false); }}>
-          <div style={{...st.modal,gap:10}} onClick={e=>e.stopPropagation()}>
-            <div style={st.modalTitle}>{operator?"操作者を切り替え":"あなたはどなたですか？"}</div>
-            <p style={{margin:"0 0 6px",fontSize:12,color:"#888",textAlign:"center"}}>この端末での記録に名前が紐づきます</p>
+        <div style={{...st.overlay,alignItems:"center",background:"rgba(0,0,0,.35)"}} onClick={()=>{ if(operator) setOpModal(false); }}>
+          <div style={st.opPopup} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:700,textAlign:"center"}}>{operator?"操作者を切り替え":"あなたはどなたですか？"}</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               {OPERATORS.map(o=>(
                 <button key={o.label} onClick={()=>chooseOperator(o.label)}
                   style={{...st.opChoice,borderColor:o.color,background:operator===o.label?o.color:"white",color:operator===o.label?"white":o.color}}>
-                  <span style={{fontSize:34}}>{o.emoji}</span>
+                  <span style={{fontSize:36}}>{o.emoji}</span>
                   <span style={{fontSize:14,fontWeight:700}}>{o.label}</span>
                 </button>
               ))}
             </div>
-            {operator&&<button onClick={()=>setOpModal(false)} style={st.cancelBtn}>キャンセル</button>}
+            {operator&&<p style={{margin:0,fontSize:11,color:"#AAA",textAlign:"center"}}>外側をクリックで閉じる</p>}
           </div>
         </div>
       )}
@@ -879,7 +878,8 @@ const st = {
   navActive:{ background:"#EEEAE4", color:"#2D2D2D" },
   opBtn:    { padding:"4px 9px", border:"1.5px solid", borderRadius:20, background:"white", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", fontFamily:"inherit" },
   opTag:    { fontSize:10, fontWeight:700, color:"white", borderRadius:10, padding:"1px 7px", whiteSpace:"nowrap", display:"inline-block" },
-  opChoice: { border:"2px solid", borderRadius:14, padding:"16px 8px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:6, fontFamily:"inherit" },
+  opChoice: { border:"2px solid", borderRadius:14, padding:"14px 8px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:6, fontFamily:"inherit" },
+  opPopup:  { background:"white", borderRadius:18, width:"calc(100% - 32px)", maxWidth:360, padding:20, display:"flex", flexDirection:"column", gap:14, boxShadow:"0 12px 40px rgba(0,0,0,.25)" },
   main:     { maxWidth:520, margin:"0 auto", padding:14 },
   section:  { display:"flex", flexDirection:"column", gap:14 },
   memoCard: { background:"#FFF8E1", border:"1.5px solid #F0D070", borderRadius:16, padding:14, display:"flex", flexDirection:"column", gap:8 },
@@ -901,7 +901,7 @@ const st = {
   secTitle:  { fontSize:17, fontWeight:700, margin:0 },
   empty:     { color:"#AAA", textAlign:"center", padding:32 },
   dateGroup: { display:"flex", flexDirection:"column", gap:6, breakInside:"avoid", marginBottom:14 },
-  homeWide:  { display:"grid", gridTemplateColumns:"1fr 380px", gap:20, alignItems:"start" },
+  homeWide:  { display:"grid", gridTemplateColumns:"1fr 440px", gap:28, alignItems:"start" },
   dateLabel: { fontSize:11, fontWeight:700, color:"#AAA", letterSpacing:.5, padding:"2px 0" },
   row:       { background:"white", border:"1px solid #EEE", borderLeft:"4px solid", borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 },
   rowInfo:   { flex:1, display:"flex", flexDirection:"column", gap:2 },
