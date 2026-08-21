@@ -132,7 +132,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v3.4";
+const APP_VERSION = "v3.5";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -807,7 +807,7 @@ export default function BabyTracker() {
                       <div key={item.id} style={{...st.row,borderLeftColor:it.color}}>
                         <span style={{fontSize:18}}>{it.emoji}</span>
                         <div style={st.rowInfo}>
-                          <span style={{fontSize:14,fontWeight:600}}>{it.label}
+                          <span style={{fontSize:wide?17:14,fontWeight:700}}>{it.label}
                             {item.ml!=null&&<span style={st.badge}>{item.ml}ml</span>}
                             {item.value!=null&&<span style={st.badge}>{item.value}{item.unit}</span>}
                           </span>
@@ -825,7 +825,7 @@ export default function BabyTracker() {
                     return(
                       <div key={item.id} style={{...st.row,borderLeftColor:SLEEP_C}}>
                         <span style={{fontSize:18}}>😴</span>
-                        <div style={st.rowInfo}><span style={{fontSize:14,fontWeight:600,color:SLEEP_C}}>就寝</span></div>
+                        <div style={st.rowInfo}><span style={{fontSize:wide?17:14,fontWeight:700,color:SLEEP_C}}>就寝</span></div>
                         <div style={st.rowRight}>
                           <span style={st.rowTime}>{fmt(item.timestamp)}</span>
                           <OpTag label={item.operator}/>
@@ -839,7 +839,7 @@ export default function BabyTracker() {
                       <div key={item.id} style={{...st.row,borderLeftColor:"#F4A261"}}>
                         <span style={{fontSize:18}}>☀️</span>
                         <div style={st.rowInfo}>
-                          <span style={{fontSize:14,fontWeight:600,color:"#B07020"}}>起床</span>
+                          <span style={{fontSize:wide?17:14,fontWeight:700,color:"#B07020"}}>起床</span>
                           <span style={{fontSize:12,color:"#888"}}>睡眠 {fmtDur(item.duration)}</span>
                         </div>
                         <div style={st.rowRight}>
@@ -857,13 +857,13 @@ export default function BabyTracker() {
           </div>
         )}
         {view==="summary"&&(
-          <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} wide={wide} />
+          <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} wide={wide} zoom={zoom} />
         )}
         {view==="settings"&&(
           <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}:st.section}>
           <div style={st.section}>
             <div style={st.settingRow}>
-              <h3 style={{margin:0,fontSize:13,color:"#555"}}>この端末の操作者</h3>
+              <h3 style={{margin:0,fontSize:wide?16:13,color:"#555"}}>この端末の操作者</h3>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                 <span style={{fontSize:16,fontWeight:700,color:curOp.color}}>{curOp.emoji} {curOp.label}</span>
                 <button onClick={()=>setOpModal(true)} style={st.memoEditBtn}>切り替え</button>
@@ -876,12 +876,12 @@ export default function BabyTracker() {
               const hrs = Math.round((reminders[it.key]||0)/60*10)/10;
               return (
                 <div key={it.key} style={st.settingRow}>
-                  <span style={{fontSize:14,fontWeight:600}}>{it.emoji} {it.label}</span>
+                  <span style={{fontSize:wide?17:14,fontWeight:700}}>{it.emoji} {it.label}</span>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <input type="range" min={0} max={12} step={0.5} value={hrs}
                       onChange={e=>setRem(prev=>({...prev,[it.key]:Math.round(Number(e.target.value)*60)}))}
                       style={{flex:1,accentColor:it.color}}/>
-                    <span style={{fontSize:13,fontWeight:700,minWidth:44,textAlign:"right"}}>
+                    <span style={{fontSize:wide?16:13,fontWeight:700,minWidth:wide?64:44,textAlign:"right"}}>
                       {hrs===0?"OFF":`${hrs}時間`}
                     </span>
                   </div>
@@ -902,12 +902,12 @@ export default function BabyTracker() {
             {/* 操作ログ */}
             <div style={st.settingRow}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <h3 style={{margin:0,fontSize:13,color:"#555"}}>📋 操作ログ（誰が・いつ・何を）</h3>
+                <h3 style={{margin:0,fontSize:wide?16:13,color:"#555"}}>📋 操作ログ（誰が・いつ・何を）</h3>
                 <button onClick={async()=>{ setLogsLoading(true); setLogs(await loadLogs()); setLogsLoading(false); }} style={st.memoEditBtn}>更新</button>
               </div>
               {logsLoading&&<p style={{margin:0,fontSize:12,color:"#AAA"}}>読み込み中...</p>}
               {!logsLoading&&logs.length===0&&<p style={{margin:0,fontSize:12,color:"#AAA"}}>まだ操作ログはありません</p>}
-              <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:360,overflowY:"auto"}}>
+              <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:wide?520:360,overflowY:"auto"}}>
                 {logs.map(l=>{
                   const o=opByLabel(l.operator);
                   const d=l.detail||{};
@@ -926,8 +926,8 @@ export default function BabyTracker() {
                   return (
                     <div key={l.id} style={{...st.logRow,borderLeftColor:isDel?"#E74C3C":o.color}}>
                       <span style={{...st.opTag,background:o.color,flexShrink:0}}>{o.emoji} {o.label}</span>
-                      <span style={{flex:1,fontSize:12,color:isDel?"#C0392B":"#333"}}>{desc}</span>
-                      <span style={{fontSize:10,color:"#999",whiteSpace:"nowrap"}}>{fmtDateTime(l.created_at)}</span>
+                      <span style={{flex:1,fontSize:wide?15:12,color:isDel?"#C0392B":"#333"}}>{desc}</span>
+                      <span style={{fontSize:wide?13:10,color:"#999",whiteSpace:"nowrap"}}>{fmtDateTime(l.created_at)}</span>
                     </div>
                   );
                 })}
@@ -1159,12 +1159,12 @@ function CompareCard({ title, sub, cur, prev, metrics, fmtDur, wide }) {
   );
 }
 
-function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C, wide }) {
+function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C, wide, zoom=1 }) {
   const [tab, setTab] = useState("nursing");
   const [mode, setMode] = useState("time");
   const days = get7Days();
   const today = new Date().toDateString();
-  const vw = typeof window!=="undefined" ? window.innerWidth : 520;
+  const vw = typeof window!=="undefined" ? window.innerWidth/zoom : 520;
   const LEFT_W = wide?36:28;
   const COL_W = wide ? Math.max(44, Math.floor((vw - 40 - 28 - LEFT_W - 2) / 7)) : 44;
   const HOUR_H = wide?28:18, BAR_MAX_H = wide?180:100;
