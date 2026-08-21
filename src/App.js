@@ -242,6 +242,17 @@ function groupByDate(items) {
   return g;
 }
 
+function useIsWide() {
+  const [wide,setWide]=useState(()=>typeof window!=="undefined"&&window.matchMedia("(min-width: 900px)").matches);
+  useEffect(()=>{
+    const mq=window.matchMedia("(min-width: 900px)");
+    const h=e=>setWide(e.matches);
+    mq.addEventListener("change",h);
+    return()=>mq.removeEventListener("change",h);
+  },[]);
+  return wide;
+}
+
 function useTick(active) {
   const [,set]=useState(0);
   useEffect(()=>{ if(!active) return; const id=setInterval(()=>set(t=>t+1),15000); return()=>clearInterval(id); },[active]);
@@ -293,6 +304,7 @@ export default function BabyTracker() {
 
   const isSleeping = sleep.find(s=>!s.end)||null;
   useTick(!!isSleeping);
+  const wide = useIsWide();
 
   // 初回ロード：Supabaseから取得
   useEffect(()=>{
@@ -518,7 +530,7 @@ export default function BabyTracker() {
         </div>
       )}
       <header style={st.header}>
-        <div style={st.headerIn}>
+        <div style={{...st.headerIn,maxWidth:wide?1100:520}}>
           <span style={st.logo}>🍼 ふくちゃん</span>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             <nav style={st.nav}>
@@ -533,9 +545,10 @@ export default function BabyTracker() {
           </div>
         </div>
       </header>
-      <main style={st.main}>
+      <main style={{...st.main,maxWidth:wide?1100:520,padding:wide?"20px 24px":14}}>
         {view==="home"&&(
-          <div style={st.section}>
+          <div style={wide?st.homeWide:st.section}>
+          <div style={{...st.section,...(wide?{position:"sticky",top:72,alignSelf:"start",order:2}:{})}}>
             {/* 引き継ぎメモ */}
             <div style={st.memoCard}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -544,7 +557,7 @@ export default function BabyTracker() {
               </div>
               {memoEditing?(
                 <>
-                  <textarea value={memoInput} onChange={e=>setMemoInput(e.target.value)} rows={4}
+                  <textarea value={memoInput} onChange={e=>setMemoInput(e.target.value)} rows={wide?8:5}
                     placeholder="次の担当者へ（例：17時にミルク120ml済み。うんち少なめ、機嫌よし）"
                     style={{...st.input,resize:"vertical",fontSize:14,lineHeight:1.5}} autoFocus/>
                   <div style={{display:"flex",gap:8}}>
@@ -582,18 +595,20 @@ export default function BabyTracker() {
                   style={{...st.sleepBtn,background:isSleeping?"#F4A261":"#CCC",opacity:!isSleeping?.45:1}}>☀️ 起きた</button>
               </div>
             </div>
+          </div>
+          <div style={{...st.section,...(wide?{order:1}:{})}}>
             {Object.entries(CATS).map(([catKey,cat])=>(
               <div key={catKey} style={st.catBlock}>
                 <div style={{...st.catLabel,color:cat.color}}>{cat.label}</div>
-                <div style={st.catGrid}>
+                <div style={{...st.catGrid,gridTemplateColumns:wide?"repeat(5,1fr)":"repeat(4,1fr)",gap:wide?10:8}}>
                   {cat.items.map((item)=>{
                     const done=justDone===item.key;
                     return (
                       <button key={item.key} onClick={()=>handleTap(item)}
-                        style={{...st.itemBtn,background:done?item.color:"white",borderColor:item.color,
+                        style={{...st.itemBtn,padding:wide?"14px 6px":"10px 4px",background:done?item.color:"white",borderColor:item.color,
                           color:done?"white":item.color,transform:done?"scale(0.94)":"scale(1)"}}>
-                        <span style={{fontSize:22}}>{item.emoji}</span>
-                        <span style={{fontSize:11,fontWeight:600,marginTop:2}}>{item.label}</span>
+                        <span style={{fontSize:wide?28:22}}>{item.emoji}</span>
+                        <span style={{fontSize:wide?13:11,fontWeight:600,marginTop:2}}>{item.label}</span>
                         {(item.key==="milk"||item.key==="pumped")&&<span style={{fontSize:9,opacity:.6}}>ml選択</span>}
                         {item.key!=="milk"&&item.key!=="pumped"&&<span style={{fontSize:9,opacity:.5}}>{timeSince(lastOf(item.key)?.timestamp||0)||"未記録"}</span>}
                       </button>
@@ -640,11 +655,13 @@ export default function BabyTracker() {
               </div>
             )}
           </div>
+          </div>
         )}
         {view==="history"&&(
           <div style={st.section}>
             <h2 style={st.secTitle}>記録履歴</h2>
             {Object.keys(groupedAll).length===0&&<p style={st.empty}>まだ記録がありません</p>}
+            <div style={wide?{columns:2,columnGap:20}:st.section}>
             {Object.entries(groupedAll).map(([dk,items])=>(
               <div key={dk} style={st.dateGroup}>
                 <div style={st.dateLabel}>{fmtDate(items[0].timestamp)}</div>
@@ -701,12 +718,14 @@ export default function BabyTracker() {
                 })}
               </div>
             ))}
+            </div>
           </div>
         )}
         {view==="summary"&&(
           <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} />
         )}
         {view==="settings"&&(
+          <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}:st.section}>
           <div style={st.section}>
             <div style={st.settingRow}>
               <h3 style={{margin:0,fontSize:13,color:"#555"}}>この端末の操作者</h3>
@@ -743,7 +762,8 @@ export default function BabyTracker() {
                 🔔 通知を許可する
               </button>
             </div>
-
+          </div>
+          <div style={st.section}>
             {/* 操作ログ */}
             <div style={st.settingRow}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -784,6 +804,7 @@ export default function BabyTracker() {
               <button onClick={clearRecords} style={st.dangerBtn}>🗑️ 記録をすべて削除</button>
               <button onClick={clearSleep} style={st.dangerBtn}>🗑️ 睡眠記録を削除</button>
             </div>
+          </div>
           </div>
         )}
       </main>
@@ -879,7 +900,8 @@ const st = {
   submitBtn:   { background:"#2D2D2D", color:"white", border:"none", borderRadius:10, padding:12, fontSize:15, fontWeight:700, cursor:"pointer" },
   secTitle:  { fontSize:17, fontWeight:700, margin:0 },
   empty:     { color:"#AAA", textAlign:"center", padding:32 },
-  dateGroup: { display:"flex", flexDirection:"column", gap:6 },
+  dateGroup: { display:"flex", flexDirection:"column", gap:6, breakInside:"avoid", marginBottom:14 },
+  homeWide:  { display:"grid", gridTemplateColumns:"1fr 380px", gap:20, alignItems:"start" },
   dateLabel: { fontSize:11, fontWeight:700, color:"#AAA", letterSpacing:.5, padding:"2px 0" },
   row:       { background:"white", border:"1px solid #EEE", borderLeft:"4px solid", borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 },
   rowInfo:   { flex:1, display:"flex", flexDirection:"column", gap:2 },
