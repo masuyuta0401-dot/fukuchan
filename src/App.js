@@ -32,7 +32,7 @@ async function loadSleep() {
     headers: { "Prefer": "" }
   });
   if (!data) return [];
-  return data.map(s => ({ id: s.id, start: s.start_time, end: s.end_time || null }));
+  return data.map(s => ({ id: s.id, start: s.start_time, end: s.end_time || null, operator: s.operator || null }));
 }
 
 async function upsertRecord(rec) {
@@ -44,6 +44,7 @@ async function upsertRecord(rec) {
       timestamp: rec.timestamp, label: rec.label || "",
       ml: rec.ml || null, value: rec.value || null,
       unit: rec.unit || null, note: rec.note || null,
+      operator: rec.operator || null,
     }),
   });
 }
@@ -59,12 +60,45 @@ async function upsertSleep(s) {
     body: JSON.stringify({
       id: s.id, user_id: "family",
       start_time: s.start, end_time: s.end || null,
+      operator: s.operator || null,
     }),
   });
 }
 
 async function deleteSleepDb(id) {
   await sbFetch(`sleep_sessions?id=eq.${id}`, { method: "DELETE" });
+}
+
+// ─── 操作ログ ─────────────────────────────────────────────────────
+async function addLog(operator, action, targetId, detail) {
+  await sbFetch("logs", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: "family", operator: operator || "不明", action,
+      target_id: targetId != null ? String(targetId) : null,
+      detail: detail || null,
+    }),
+  });
+}
+
+async function loadLogs() {
+  const data = await sbFetch("logs?user_id=eq.family&order=created_at.desc&limit=150", {
+    headers: { "Prefer": "" }
+  });
+  return data || [];
+}
+
+// ─── 引き継ぎメモ ─────────────────────────────────────────────────
+async function loadMemo() {
+  const data = await sbFetch("memos?id=eq.family", { headers: { "Prefer": "" } });
+  return data && data[0] ? data[0] : { content: "", operator: null, updated_at: null };
+}
+
+async function saveMemoDb(content, operator) {
+  await sbFetch("memos?id=eq.family", {
+    method: "PATCH",
+    body: JSON.stringify({ content, operator, updated_at: new Date().toISOString() }),
+  });
 }
 
 // ─── プッシュ通知 ─────────────────────────────────────────────────
@@ -102,6 +136,29 @@ function gasPost(body) {
 const SK = "bt_records";
 const SLEEP_SK = "bt_sleep";
 const REM_SK = "bt_reminders";
+const OP_SK = "bt_operator";
+
+// ─── 操作者 ──────────────────────────────────────────────────────
+const OPERATORS = [
+  { label:"ママ",       emoji:"👩", color:"#F08080" },
+  { label:"パパ",       emoji:"👨", color:"#4A90D9" },
+  { label:"おじいちゃん", emoji:"👴", color:"#7C6FCD" },
+  { label:"おばあちゃん", emoji:"👵", color:"#E8845C" },
+];
+const opByLabel = (label) => OPERATORS.find(o=>o.label===label) || { label: label||"？", emoji:"👤", color:"#999" };
+
+const ACTION_LABELS = {
+  add_record:    "記録",
+  delete_record: "記録を削除",
+  sleep_start:   "就寝",
+  sleep_end:     "起床",
+  sleep_manual:  "睡眠を手動記録",
+  delete_sleep:  "睡眠を削除",
+  memo_update:   "引き継ぎメモを更新",
+  clear_records: "記録を全削除",
+  clear_sleep:   "睡眠記録を全削除",
+  operator_change:"操作者を変更",
+};
 
 const CATS = {
   nursing: {
@@ -157,6 +214,7 @@ const itemByKey = (key) => ALL_ITEMS.find((i) => i.key === key) || { label: key,
 const ML_OPTIONS = [0,5,10,15,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,200,220,240,260,280,300];
 
 const fmt = (d) => new Intl.DateTimeFormat("ja-JP",{hour:"2-digit",minute:"2-digit"}).format(new Date(d));
+const fmtDateTime = (d) => new Intl.DateTimeFormat("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(d));
 const fmtDate = (d) => {
   const diff = Math.floor((Date.now()-new Date(d).getTime())/86400000);
   if(diff===0) return "今日";
@@ -189,6 +247,11 @@ function useTick(active) {
   useEffect(()=>{ if(!active) return; const id=setInterval(()=>set(t=>t+1),15000); return()=>clearInterval(id); },[active]);
 }
 
+const mapRecs = (recs) => recs.map(r=>({
+  id: r.id, key: r.key, timestamp: r.timestamp,
+  label: r.label, ml: r.ml, value: r.value, unit: r.unit, note: r.note, operator: r.operator || null,
+}));
+
 export default function BabyTracker() {
   const [records, setRecords] = useState([]);
   const [sleep, setSleep]     = useState([]);
@@ -212,6 +275,22 @@ export default function BabyTracker() {
   const [otherModal, setOtherModal] = useState(false);
   const [otherText,  setOtherText]  = useState("");
 
+  // 操作者
+  const [operator, setOperator] = useState(()=>localStorage.getItem(OP_SK)||null);
+  const [opModal, setOpModal]   = useState(false);
+  const opRef = useRef(operator);
+  useEffect(()=>{ opRef.current = operator; },[operator]);
+
+  // 引き継ぎメモ
+  const [memo, setMemo]           = useState({ content:"", operator:null, updated_at:null });
+  const [memoEditing, setMemoEditing] = useState(false);
+  const [memoInput, setMemoInput] = useState("");
+  const [memoSaving, setMemoSaving] = useState(false);
+
+  // 操作ログ
+  const [logs, setLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
   const isSleeping = sleep.find(s=>!s.end)||null;
   useTick(!!isSleeping);
 
@@ -219,14 +298,10 @@ export default function BabyTracker() {
   useEffect(()=>{
     (async()=>{
       setLoading(true);
-      const [recs, slps] = await Promise.all([loadRecords(), loadSleep()]);
+      const [recs, slps, m] = await Promise.all([loadRecords(), loadSleep(), loadMemo()]);
       if(recs.length > 0) {
-        setRecords(recs.map(r=>({
-          id: r.id, key: r.key, timestamp: r.timestamp,
-          label: r.label, ml: r.ml, value: r.value, unit: r.unit, note: r.note,
-        })));
+        setRecords(mapRecs(recs));
       } else {
-        // Supabaseが空ならlocalStorageから移行
         const local = JSON.parse(localStorage.getItem(SK)||"[]");
         setRecords(local);
       }
@@ -236,6 +311,7 @@ export default function BabyTracker() {
         const local = JSON.parse(localStorage.getItem(SLEEP_SK)||"[]");
         setSleep(local);
       }
+      setMemo(m);
       setLoading(false);
     })();
   },[]);
@@ -243,17 +319,19 @@ export default function BabyTracker() {
   // 30秒ごとに最新データを取得（他デバイスの更新を反映）
   useEffect(()=>{
     const id = setInterval(async()=>{
-      const [recs, slps] = await Promise.all([loadRecords(), loadSleep()]);
-      if(recs.length >= 0) {
-        setRecords(recs.map(r=>({
-          id: r.id, key: r.key, timestamp: r.timestamp,
-          label: r.label, ml: r.ml, value: r.value, unit: r.unit, note: r.note,
-        })));
-      }
+      const [recs, slps, m] = await Promise.all([loadRecords(), loadSleep(), loadMemo()]);
+      if(recs.length >= 0) setRecords(mapRecs(recs));
       if(slps.length >= 0) setSleep(slps);
+      if(!memoEditing) setMemo(m);
     }, 30000);
     return()=>clearInterval(id);
-  },[]);
+  },[memoEditing]);
+
+  // 設定タブを開いたときにログを読み込む
+  useEffect(()=>{
+    if(view!=="settings") return;
+    (async()=>{ setLogsLoading(true); setLogs(await loadLogs()); setLogsLoading(false); })();
+  },[view]);
 
   useEffect(()=>{ localStorage.setItem(REM_SK,JSON.stringify(reminders)); },[reminders]);
 
@@ -280,21 +358,33 @@ export default function BabyTracker() {
 
   const flash = (k) => { setJustDone(k); setTimeout(()=>setJustDone(null),1200); };
 
+  const chooseOperator = (label) => {
+    const prev = opRef.current;
+    setOperator(label);
+    localStorage.setItem(OP_SK, label);
+    setOpModal(false);
+    if(prev && prev!==label) addLog(label, "operator_change", null, { from: prev, to: label });
+  };
+
   const addRecord = useCallback(async(key,extra={},ts=Date.now())=>{
-    const rec = {id:Date.now()+Math.random(),key,timestamp:ts,...extra};
+    const op = opRef.current;
+    const it = itemByKey(key);
+    const rec = {id:Date.now()+Math.random(),key,timestamp:ts,operator:op,...extra};
     setRecords(prev=>[rec,...prev].slice(0,1000));
     flash(key);
-    const it = itemByKey(key);
     const recWithLabel = { ...rec, label: it.label };
-    // Supabase & GAS に並行送信
     await upsertRecord(recWithLabel);
     gasPost({ action:"add", record:{ ...recWithLabel, unit:extra.unit||"" } });
+    addLog(op, "add_record", rec.id, { label: it.label, ml: extra.ml ?? null, value: extra.value ?? null, unit: extra.unit ?? null, note: extra.note ?? null, timestamp: ts });
   },[]);
 
   const delRecord = async(id) => {
+    const target = records.find(r=>r.id===id);
     setRecords(prev=>prev.filter(r=>r.id!==id));
     await deleteRecord(id);
     gasPost({ action:"delete", id });
+    const it = target ? itemByKey(target.key) : null;
+    addLog(opRef.current, "delete_record", id, target ? { label: it.label, ml: target.ml ?? null, value: target.value ?? null, unit: target.unit ?? null, note: target.note ?? null, timestamp: target.timestamp, recorded_by: target.operator ?? null } : null);
   };
 
   const handleTap = (item) => {
@@ -313,31 +403,40 @@ export default function BabyTracker() {
 
   const startSleep = async(ts=Date.now()) => {
     if(isSleeping) return;
-    const s = {id:Date.now(),start:ts,end:null};
+    const op = opRef.current;
+    const s = {id:Date.now(),start:ts,end:null,operator:op};
     setSleep(prev=>[s,...prev]);
     flash("sleep");
     await upsertSleep(s);
     gasPost({ action:"addSleep", session:s });
+    addLog(op, "sleep_start", s.id, { start: ts });
   };
   const endSleep = async(ts=Date.now()) => {
     if(!isSleeping) return;
+    const op = opRef.current;
     const updated = {...isSleeping, end:ts};
     setSleep(prev=>prev.map(s=>!s.end?updated:s));
     flash("wake");
     await upsertSleep(updated);
     gasPost({ action:"updateSleep", session:updated });
+    addLog(op, "sleep_end", updated.id, { start: updated.start, end: ts, duration_min: Math.round((ts-updated.start)/60000) });
   };
   const delSleep = async(id) => {
+    const target = sleep.find(s=>s.id===id);
     setSleep(prev=>prev.filter(s=>s.id!==id));
     await deleteSleepDb(id);
     gasPost({ action:"deleteSleep", id });
+    addLog(opRef.current, "delete_sleep", id, target ? { start: target.start, end: target.end, recorded_by: target.operator ?? null } : null);
   };
   const addSleepManual=async()=>{
     if(!smStart) return;
-    const s = {id:Date.now(),start:new Date(smStart).getTime(),end:smEnd?new Date(smEnd).getTime():null};
+    const op = opRef.current;
+    const s = {id:Date.now(),start:new Date(smStart).getTime(),end:smEnd?new Date(smEnd).getTime():null,operator:op};
     setSleep(prev=>[s,...prev]);
     setSleepManual(false); setSmStart(""); setSmEnd("");
     await upsertSleep(s);
+    gasPost({ action:"addSleep", session:s });
+    addLog(op, "sleep_manual", s.id, { start: s.start, end: s.end });
   };
   const submitManual=()=>{
     if(!manualKey||!manualTime) return;
@@ -350,6 +449,32 @@ export default function BabyTracker() {
     setManualOpen(false); setManualKey(null); setManualTime(""); setManualMl(null); setManualVal(""); setManualNote("");
   };
 
+  const startMemoEdit = () => { setMemoInput(memo.content||""); setMemoEditing(true); };
+  const saveMemo = async() => {
+    const op = opRef.current;
+    const content = memoInput.trim();
+    setMemoSaving(true);
+    await saveMemoDb(content, op);
+    const now = new Date().toISOString();
+    setMemo({ content, operator: op, updated_at: now });
+    setMemoEditing(false);
+    setMemoSaving(false);
+    addLog(op, "memo_update", "family", { content });
+  };
+
+  const clearRecords = async() => {
+    if(!confirm("記録をすべて削除？（全端末から消えます）")) return;
+    setRecords([]);
+    await sbFetch("records?user_id=eq.family", { method:"DELETE" });
+    addLog(opRef.current, "clear_records", null, null);
+  };
+  const clearSleep = async() => {
+    if(!confirm("睡眠記録をすべて削除？（全端末から消えます）")) return;
+    setSleep([]);
+    await sbFetch("sleep_sessions?user_id=eq.family", { method:"DELETE" });
+    addLog(opRef.current, "clear_sleep", null, null);
+  };
+
   const todayCount = (key)=>records.filter(r=>r.key===key&&new Date(r.timestamp).toDateString()===todayStr()).length;
   const lastOf     = (key)=>records.find(r=>r.key===key);
   const todaySleepMs=sleep.filter(s=>s.end&&new Date(s.start).toDateString()===todayStr()).reduce((a,s)=>a+(s.end-s.start),0);
@@ -357,13 +482,20 @@ export default function BabyTracker() {
   const allItems=[
     ...records.map(r=>({...r,itemType:"record"})),
     ...sleep.flatMap(s=>{
-      const arr=[{id:s.id+"_s",itemType:"sleep_start",timestamp:s.start,sessionId:s.id}];
-      if(s.end) arr.push({id:s.id+"_e",itemType:"sleep_end",timestamp:s.end,sessionId:s.id,duration:s.end-s.start});
+      const arr=[{id:s.id+"_s",itemType:"sleep_start",timestamp:s.start,sessionId:s.id,operator:s.operator}];
+      if(s.end) arr.push({id:s.id+"_e",itemType:"sleep_end",timestamp:s.end,sessionId:s.id,duration:s.end-s.start,operator:s.operator});
       return arr;
     }),
   ].sort((a,b)=>b.timestamp-a.timestamp);
   const groupedAll=groupByDate(allItems);
   const SLEEP_C="#7C6FCD";
+  const curOp = opByLabel(operator);
+
+  const OpTag = ({ label }) => {
+    if(!label) return null;
+    const o = opByLabel(label);
+    return <span style={{...st.opTag, background:o.color}}>{o.emoji} {o.label}</span>;
+  };
 
   if(loading) return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#FAFAF8",flexDirection:"column",gap:12}}>
@@ -371,6 +503,9 @@ export default function BabyTracker() {
       <div style={{fontSize:16,color:"#888"}}>データを読み込み中...</div>
     </div>
   );
+
+  // 操作者選択モーダル（初回 or 切り替え）
+  const showOpModal = !operator || opModal;
 
   return (
     <div style={st.app}>
@@ -385,16 +520,51 @@ export default function BabyTracker() {
       <header style={st.header}>
         <div style={st.headerIn}>
           <span style={st.logo}>🍼 ふくちゃん</span>
-          <nav style={st.nav}>
-            {[["home","記録"],["history","履歴"],["summary","グラフ"],["settings","設定"]].map(([v,l])=>(
-              <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,...(view===v?st.navActive:{})}}>{l}</button>
-            ))}
-          </nav>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <nav style={st.nav}>
+              {[["home","記録"],["history","履歴"],["summary","グラフ"],["settings","設定"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,...(view===v?st.navActive:{})}}>{l}</button>
+              ))}
+            </nav>
+            <button onClick={()=>setOpModal(true)} title="操作者を切り替え"
+              style={{...st.opBtn, borderColor:curOp.color, color:curOp.color}}>
+              {curOp.emoji} {curOp.label}
+            </button>
+          </div>
         </div>
       </header>
       <main style={st.main}>
         {view==="home"&&(
           <div style={st.section}>
+            {/* 引き継ぎメモ */}
+            <div style={st.memoCard}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:13,fontWeight:700,color:"#8A6D1F"}}>📝 引き継ぎメモ</span>
+                {!memoEditing&&<button onClick={startMemoEdit} style={st.memoEditBtn}>{memo.content?"編集":"書く"}</button>}
+              </div>
+              {memoEditing?(
+                <>
+                  <textarea value={memoInput} onChange={e=>setMemoInput(e.target.value)} rows={4}
+                    placeholder="次の担当者へ（例：17時にミルク120ml済み。うんち少なめ、機嫌よし）"
+                    style={{...st.input,resize:"vertical",fontSize:14,lineHeight:1.5}} autoFocus/>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={saveMemo} disabled={memoSaving} style={{...st.submitBtn,flex:1,background:"#8A6D1F",padding:10}}>{memoSaving?"保存中...":"保存する"}</button>
+                    <button onClick={()=>setMemoEditing(false)} style={{...st.cancelBtn,marginTop:0,flex:1,padding:10}}>キャンセル</button>
+                  </div>
+                </>
+              ):(
+                <>
+                  <div style={{fontSize:14,lineHeight:1.6,whiteSpace:"pre-wrap",color:memo.content?"#2D2D2D":"#AAA"}}>
+                    {memo.content||"まだメモはありません。次の担当者への申し送りを残せます。"}
+                  </div>
+                  {memo.updated_at&&(
+                    <div style={{fontSize:11,color:"#999",display:"flex",alignItems:"center",gap:6}}>
+                      <OpTag label={memo.operator}/> {fmtDateTime(memo.updated_at)} 更新
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
             <div style={{...st.sleepCard,borderColor:SLEEP_C,background:"#F0EEFF"}}>
               <div style={st.sleepTop}>
                 <span style={{fontSize:30}}>{isSleeping?"😴":"☀️"}</span>
@@ -491,7 +661,10 @@ export default function BabyTracker() {
                           </span>
                           {item.note&&<span style={{fontSize:12,color:"#888"}}>{item.note}</span>}
                         </div>
-                        <span style={st.rowTime}>{fmt(item.timestamp)}</span>
+                        <div style={st.rowRight}>
+                          <span style={st.rowTime}>{fmt(item.timestamp)}</span>
+                          <OpTag label={item.operator}/>
+                        </div>
                         <button onClick={()=>delRecord(item.id)} style={st.delBtn}>×</button>
                       </div>
                     );
@@ -501,7 +674,10 @@ export default function BabyTracker() {
                       <div key={item.id} style={{...st.row,borderLeftColor:SLEEP_C}}>
                         <span style={{fontSize:18}}>😴</span>
                         <div style={st.rowInfo}><span style={{fontSize:14,fontWeight:600,color:SLEEP_C}}>就寝</span></div>
-                        <span style={st.rowTime}>{fmt(item.timestamp)}</span>
+                        <div style={st.rowRight}>
+                          <span style={st.rowTime}>{fmt(item.timestamp)}</span>
+                          <OpTag label={item.operator}/>
+                        </div>
                         <button onClick={()=>delSleep(item.sessionId)} style={st.delBtn}>×</button>
                       </div>
                     );
@@ -514,7 +690,10 @@ export default function BabyTracker() {
                           <span style={{fontSize:14,fontWeight:600,color:"#B07020"}}>起床</span>
                           <span style={{fontSize:12,color:"#888"}}>睡眠 {fmtDur(item.duration)}</span>
                         </div>
-                        <span style={st.rowTime}>{fmt(item.timestamp)}</span>
+                        <div style={st.rowRight}>
+                          <span style={st.rowTime}>{fmt(item.timestamp)}</span>
+                        </div>
+                        <span style={{width:24}}/>
                       </div>
                     );
                   }
@@ -529,6 +708,14 @@ export default function BabyTracker() {
         )}
         {view==="settings"&&(
           <div style={st.section}>
+            <div style={st.settingRow}>
+              <h3 style={{margin:0,fontSize:13,color:"#555"}}>この端末の操作者</h3>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span style={{fontSize:16,fontWeight:700,color:curOp.color}}>{curOp.emoji} {curOp.label}</span>
+                <button onClick={()=>setOpModal(true)} style={st.memoEditBtn}>切り替え</button>
+              </div>
+            </div>
+
             <h2 style={st.secTitle}>リマインダー設定</h2>
             <p style={{fontSize:13,color:"#888",margin:0}}>最後の記録から指定時間後にアラート</p>
             {ALL_ITEMS.slice(0,7).map(it=>{
@@ -556,14 +743,69 @@ export default function BabyTracker() {
                 🔔 通知を許可する
               </button>
             </div>
+
+            {/* 操作ログ */}
+            <div style={st.settingRow}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <h3 style={{margin:0,fontSize:13,color:"#555"}}>📋 操作ログ（誰が・いつ・何を）</h3>
+                <button onClick={async()=>{ setLogsLoading(true); setLogs(await loadLogs()); setLogsLoading(false); }} style={st.memoEditBtn}>更新</button>
+              </div>
+              {logsLoading&&<p style={{margin:0,fontSize:12,color:"#AAA"}}>読み込み中...</p>}
+              {!logsLoading&&logs.length===0&&<p style={{margin:0,fontSize:12,color:"#AAA"}}>まだ操作ログはありません</p>}
+              <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:360,overflowY:"auto"}}>
+                {logs.map(l=>{
+                  const o=opByLabel(l.operator);
+                  const d=l.detail||{};
+                  let desc=ACTION_LABELS[l.action]||l.action;
+                  if(l.action==="add_record"||l.action==="delete_record"){
+                    desc+=`：${d.label||""}`;
+                    if(d.ml!=null) desc+=` ${d.ml}ml`;
+                    if(d.value!=null) desc+=` ${d.value}${d.unit||""}`;
+                    if(d.note) desc+=`（${d.note}）`;
+                    if(d.timestamp) desc+=` @${fmt(d.timestamp)}`;
+                  }
+                  if(l.action==="sleep_end"&&d.duration_min!=null) desc+=`（${fmtDur(d.duration_min*60000)}）`;
+                  if(l.action==="memo_update") desc+=`：${(d.content||"").slice(0,30)}${(d.content||"").length>30?"…":""}`;
+                  if(l.action==="operator_change") desc+=`：${d.from}→${d.to}`;
+                  const isDel=l.action.startsWith("delete")||l.action.startsWith("clear");
+                  return (
+                    <div key={l.id} style={{...st.logRow,borderLeftColor:isDel?"#E74C3C":o.color}}>
+                      <span style={{...st.opTag,background:o.color,flexShrink:0}}>{o.emoji} {o.label}</span>
+                      <span style={{flex:1,fontSize:12,color:isDel?"#C0392B":"#333"}}>{desc}</span>
+                      <span style={{fontSize:10,color:"#999",whiteSpace:"nowrap"}}>{fmtDateTime(l.created_at)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <div style={st.dangerZone}>
               <h3 style={{margin:0,fontSize:13,color:"#C0392B"}}>データ管理</h3>
-              <button onClick={()=>{ if(confirm("記録をすべて削除？")) setRecords([]); }} style={st.dangerBtn}>🗑️ 記録をすべて削除</button>
-              <button onClick={()=>{ if(confirm("睡眠記録をすべて削除？")) setSleep([]); }} style={st.dangerBtn}>🗑️ 睡眠記録を削除</button>
+              <button onClick={clearRecords} style={st.dangerBtn}>🗑️ 記録をすべて削除</button>
+              <button onClick={clearSleep} style={st.dangerBtn}>🗑️ 睡眠記録を削除</button>
             </div>
           </div>
         )}
       </main>
+
+      {showOpModal&&(
+        <div style={st.overlay} onClick={()=>{ if(operator) setOpModal(false); }}>
+          <div style={{...st.modal,gap:10}} onClick={e=>e.stopPropagation()}>
+            <div style={st.modalTitle}>{operator?"操作者を切り替え":"あなたはどなたですか？"}</div>
+            <p style={{margin:"0 0 6px",fontSize:12,color:"#888",textAlign:"center"}}>この端末での記録に名前が紐づきます</p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {OPERATORS.map(o=>(
+                <button key={o.label} onClick={()=>chooseOperator(o.label)}
+                  style={{...st.opChoice,borderColor:o.color,background:operator===o.label?o.color:"white",color:operator===o.label?"white":o.color}}>
+                  <span style={{fontSize:34}}>{o.emoji}</span>
+                  <span style={{fontSize:14,fontWeight:700}}>{o.label}</span>
+                </button>
+              ))}
+            </div>
+            {operator&&<button onClick={()=>setOpModal(false)} style={st.cancelBtn}>キャンセル</button>}
+          </div>
+        </div>
+      )}
       {mlModal&&(
         <div style={st.overlay} onClick={()=>setMlModal(null)}>
           <div style={st.modal} onClick={e=>e.stopPropagation()}>
@@ -614,8 +856,13 @@ const st = {
   nav:      { display:"flex", gap:2 },
   navBtn:   { padding:"5px 9px", border:"none", background:"transparent", borderRadius:20, fontSize:12, cursor:"pointer", color:"#888", fontWeight:500 },
   navActive:{ background:"#EEEAE4", color:"#2D2D2D" },
+  opBtn:    { padding:"4px 9px", border:"1.5px solid", borderRadius:20, background:"white", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", fontFamily:"inherit" },
+  opTag:    { fontSize:10, fontWeight:700, color:"white", borderRadius:10, padding:"1px 7px", whiteSpace:"nowrap", display:"inline-block" },
+  opChoice: { border:"2px solid", borderRadius:14, padding:"16px 8px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:6, fontFamily:"inherit" },
   main:     { maxWidth:520, margin:"0 auto", padding:14 },
   section:  { display:"flex", flexDirection:"column", gap:14 },
+  memoCard: { background:"#FFF8E1", border:"1.5px solid #F0D070", borderRadius:16, padding:14, display:"flex", flexDirection:"column", gap:8 },
+  memoEditBtn:{ background:"white", border:"1.5px solid #DDD", borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:600, cursor:"pointer", color:"#555", fontFamily:"inherit" },
   sleepCard:{ border:"2px solid", borderRadius:16, padding:14, display:"flex", flexDirection:"column", gap:10 },
   sleepTop: { display:"flex", alignItems:"center", gap:12 },
   sleepBtns:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 },
@@ -636,10 +883,12 @@ const st = {
   dateLabel: { fontSize:11, fontWeight:700, color:"#AAA", letterSpacing:.5, padding:"2px 0" },
   row:       { background:"white", border:"1px solid #EEE", borderLeft:"4px solid", borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 },
   rowInfo:   { flex:1, display:"flex", flexDirection:"column", gap:2 },
+  rowRight:  { display:"flex", flexDirection:"column", alignItems:"flex-end", gap:3 },
   rowTime:   { fontSize:12, color:"#888", whiteSpace:"nowrap" },
   delBtn:    { background:"none", border:"none", color:"#CCC", cursor:"pointer", fontSize:16, padding:4 },
   badge:     { marginLeft:6, fontSize:11, background:"#F0F0F0", borderRadius:6, padding:"1px 6px", color:"#555" },
   settingRow:{ background:"white", border:"1px solid #EEE", borderRadius:12, padding:14, display:"flex", flexDirection:"column", gap:8 },
+  logRow:    { background:"#FAFAFA", borderLeft:"3px solid", borderRadius:6, padding:"6px 8px", display:"flex", alignItems:"center", gap:8 },
   dangerZone:{ background:"#FFF5F5", border:"1px solid #FFE0E0", borderRadius:12, padding:14, display:"flex", flexDirection:"column", gap:8 },
   dangerBtn: { background:"white", border:"1.5px solid #E74C3C", borderRadius:10, padding:10, color:"#E74C3C", fontSize:13, fontWeight:600, cursor:"pointer" },
   overlay:   { position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:50, display:"flex", alignItems:"flex-end", justifyContent:"center" },
