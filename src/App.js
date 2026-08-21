@@ -132,7 +132,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v2.3";
+const APP_VERSION = "v2.4";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -516,6 +516,9 @@ export default function BabyTracker() {
   const SLEEP_C="#7C6FCD";
   const curOp = opByLabel(operator);
 
+  const ovl = wide ? {...st.overlay, alignItems:"center"} : st.overlay;
+  const mdl = wide ? {...st.modal, borderRadius:24, maxWidth:560, maxHeight:"80vh", padding:28, boxShadow:"0 16px 48px rgba(0,0,0,.3)"} : st.modal;
+  const mTitle = wide ? {...st.modalTitle, fontSize:26} : st.modalTitle;
   const OpTag = ({ label }) => {
     if(!label) return null;
     const o = opByLabel(label);
@@ -925,37 +928,45 @@ export default function BabyTracker() {
         </div>
       )}
       {mlModal&&(
-        <div style={st.overlay} onClick={()=>setMlModal(null)}>
-          <div style={st.modal} onClick={e=>e.stopPropagation()}>
-            <div style={st.modalTitle}>{mlModal.emoji} {mlModal.label}</div>
-            <div style={st.mlList}>
-              {ML_OPTIONS.map(ml=><button key={ml} onClick={()=>confirmMl(ml)} style={st.mlItem}>{ml}ml</button>)}
-            </div>
+        <div style={ovl} onClick={()=>setMlModal(null)}>
+          <div style={mdl} onClick={e=>e.stopPropagation()}>
+            <div style={mTitle}>{mlModal.emoji} {mlModal.label}</div>
+            {wide?(
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+                {ML_OPTIONS.map(ml=><button key={ml} onClick={()=>confirmMl(ml)} style={{border:`2px solid ${mlModal.color}`,background:"white",color:mlModal.color,borderRadius:14,padding:"16px 4px",fontSize:20,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>{ml}<span style={{fontSize:12,fontWeight:600}}>ml</span></button>)}
+              </div>
+            ):(
+              <div style={st.mlList}>
+                {ML_OPTIONS.map(ml=><button key={ml} onClick={()=>confirmMl(ml)} style={st.mlItem}>{ml}ml</button>)}
+              </div>
+            )}
             <button onClick={()=>setMlModal(null)} style={st.cancelBtn}>キャンセル</button>
           </div>
         </div>
       )}
       {valModal&&(
-        <div style={st.overlay} onClick={()=>setValModal(null)}>
-          <div style={{...st.modal,gap:12}} onClick={e=>e.stopPropagation()}>
-            <div style={st.modalTitle}>{valModal.label} ({valModal.unit})</div>
+        <div style={ovl} onClick={()=>setValModal(null)}>
+          <div style={{...mdl,gap:14}} onClick={e=>e.stopPropagation()}>
+            <div style={mTitle}>{valModal.emoji} {valModal.label} ({valModal.unit})</div>
             <input type="number" step="0.1" placeholder={valModal.placeholder}
               value={valInput} onChange={e=>setValInput(e.target.value)}
-              style={{...st.input,fontSize:20,textAlign:"center"}} autoFocus/>
-            <button onClick={confirmVal} style={st.submitBtn} disabled={!valInput}>記録する</button>
+              onKeyDown={e=>{ if(e.key==="Enter") confirmVal(); }}
+              style={{...st.input,fontSize:wide?40:20,padding:wide?"18px":"10px 12px",textAlign:"center",fontWeight:700,borderColor:valModal.color}} autoFocus/>
+            <button onClick={confirmVal} style={{...st.submitBtn,fontSize:wide?20:15,padding:wide?16:12,background:valModal.color}} disabled={!valInput}>記録する</button>
             <button onClick={()=>setValModal(null)} style={st.cancelBtn}>キャンセル</button>
           </div>
         </div>
       )}
       {otherModal&&(
-        <div style={st.overlay} onClick={()=>setOtherModal(false)}>
-          <div style={{...st.modal,gap:12}} onClick={e=>e.stopPropagation()}>
-            <div style={st.modalTitle}>••• その他</div>
+        <div style={ovl} onClick={()=>setOtherModal(false)}>
+          <div style={{...mdl,gap:14}} onClick={e=>e.stopPropagation()}>
+            <div style={mTitle}>••• その他</div>
             <input placeholder="内容を入力（例：散歩、泣いた...）"
               value={otherText} onChange={e=>setOtherText(e.target.value)}
-              style={{...st.input,fontSize:16}} autoFocus/>
+              onKeyDown={e=>{ if(e.key==="Enter"&&otherText.trim()){ addRecord("other",{note:otherText.trim()}); setOtherModal(false); setOtherText(""); } }}
+              style={{...st.input,fontSize:wide?22:16,padding:wide?"16px":"10px 12px"}} autoFocus/>
             <button onClick={()=>{ if(!otherText.trim()) return; addRecord("other",{note:otherText.trim()}); setOtherModal(false); setOtherText(""); }}
-              style={st.submitBtn} disabled={!otherText.trim()}>記録する</button>
+              style={{...st.submitBtn,fontSize:wide?20:15,padding:wide?16:12}} disabled={!otherText.trim()}>記録する</button>
             <button onClick={()=>setOtherModal(false)} style={st.cancelBtn}>キャンセル</button>
           </div>
         </div>
