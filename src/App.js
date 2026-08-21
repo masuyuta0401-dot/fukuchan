@@ -132,7 +132,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v3.3";
+const APP_VERSION = "v3.4";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -255,6 +255,19 @@ function useIsWide() {
   return wide;
 }
 
+// PC用の拡大率：画面幅1200pxで1.3倍、幅が広いほど大きく（最大2.2倍）
+function useZoom(wide) {
+  const calc=()=>{ if(!wide) return 1; const w=window.innerWidth; return Math.min(2.2, Math.max(1.3, w/950)); };
+  const [z,setZ]=useState(calc);
+  useEffect(()=>{
+    const h=()=>setZ(calc());
+    h(); window.addEventListener("resize",h);
+    return()=>window.removeEventListener("resize",h);
+    // eslint-disable-next-line
+  },[wide]);
+  return z;
+}
+
 function useTick(active) {
   const [,set]=useState(0);
   useEffect(()=>{ if(!active) return; const id=setInterval(()=>set(t=>t+1),15000); return()=>clearInterval(id); },[active]);
@@ -330,6 +343,7 @@ export default function BabyTracker() {
   const isSleeping = sleep.find(s=>!s.end)||null;
   useTick(!!isSleeping);
   const wide = useIsWide();
+  const zoom = useZoom(wide);
 
   // 初回ロード：Supabaseから取得
   useEffect(()=>{
@@ -556,7 +570,7 @@ export default function BabyTracker() {
   const showOpModal = !operator || opModal;
 
   return (
-    <div style={{...st.app,zoom:wide?1.18:1}}>
+    <div style={{...st.app,zoom}}>
       {Object.keys(alerts).length>0&&(
         <div style={st.alertBar}>
           {Object.entries(alerts).map(([k,m])=>{
