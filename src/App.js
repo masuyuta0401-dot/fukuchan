@@ -132,7 +132,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v2.4";
+const APP_VERSION = "v3.1";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -143,7 +143,7 @@ const OP_SK = "bt_operator";
 // ─── 操作者 ──────────────────────────────────────────────────────
 const OPERATORS = [
   { label:"ママ",       emoji:"👩", color:"#F08080" },
-  { label:"パパ",       emoji:"👨", color:"#4A90D9" },
+  { label:"パパ",       emoji:"👨", color:"#3E8FC7" },
   { label:"おじいちゃん", emoji:"👴", color:"#7C6FCD" },
   { label:"おばあちゃん", emoji:"👵", color:"#E8845C" },
 ];
@@ -265,7 +265,27 @@ const mapRecs = (recs) => recs.map(r=>({
   label: r.label, ml: r.ml, value: r.value, unit: r.unit, note: r.note, operator: r.operator || null,
 }));
 
+function useGlobalStyle() {
+  useEffect(()=>{
+    if(document.getElementById("fk-font")) return;
+    const l=document.createElement("link"); l.id="fk-font"; l.rel="stylesheet";
+    l.href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap";
+    document.head.appendChild(l);
+    const c=document.createElement("style"); c.id="fk-css";
+    c.textContent=`
+      body{margin:0;background:#F4FAFE;}
+      button{font-family:inherit;}
+      button:active{transform:scale(.96);}
+      *::-webkit-scrollbar{width:8px;height:8px}
+      *::-webkit-scrollbar-thumb{background:#CFE3F0;border-radius:8px}
+      input,textarea,select{font-family:inherit;}
+    `;
+    document.head.appendChild(c);
+  },[]);
+}
+
 export default function BabyTracker() {
+  useGlobalStyle();
   const [records, setRecords] = useState([]);
   const [sleep, setSleep]     = useState([]);
   const [reminders, setRem]   = useState(()=>{ try{return JSON.parse(localStorage.getItem(REM_SK)||"{}")}catch{return{}} });
@@ -526,8 +546,8 @@ export default function BabyTracker() {
   };
 
   if(loading) return(
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#FAFAF8",flexDirection:"column",gap:12}}>
-      <div style={{fontSize:40}}>🍼</div>
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F4FAFE",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:56}}>🐣</div>
       <div style={{fontSize:16,color:"#888"}}>データを読み込み中...</div>
     </div>
   );
@@ -536,7 +556,7 @@ export default function BabyTracker() {
   const showOpModal = !operator || opModal;
 
   return (
-    <div style={st.app}>
+    <div style={{...st.app,zoom:wide?1.18:1}}>
       {Object.keys(alerts).length>0&&(
         <div style={st.alertBar}>
           {Object.entries(alerts).map(([k,m])=>{
@@ -547,15 +567,15 @@ export default function BabyTracker() {
       )}
       <header style={st.header}>
         <div style={{...st.headerIn,maxWidth:wide?"none":520,padding:wide?"12px 20px":"10px 14px"}}>
-          <span style={{...st.logo,fontSize:wide?22:17}}>🍼 ふくちゃん <span style={{fontSize:11,color:"#BBB",fontWeight:500}}>{APP_VERSION}</span></span>
+          <span style={{...st.logo,fontSize:wide?24:18}}>🐥 千隼 <span style={{fontSize:11,color:"rgba(255,255,255,.75)",fontWeight:500}}>{APP_VERSION}</span></span>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             <nav style={st.nav}>
-              {[["home","記録"],["history","履歴"],["summary","グラフ"],["settings","設定"]].map(([v,l])=>(
+              {[["home","🍼 記録"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
                 <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,fontSize:wide?15:12,padding:wide?"7px 14px":"5px 9px",...(view===v?st.navActive:{})}}>{l}</button>
               ))}
             </nav>
             <button onClick={()=>setOpModal(true)} title="操作者を切り替え"
-              style={{...st.opBtn, borderColor:curOp.color, color:curOp.color, fontSize:wide?15:11, padding:wide?"7px 16px":"4px 9px"}}>
+              style={{...st.opBtn, background:"white", borderColor:"white", color:curOp.color, fontSize:wide?15:11, padding:wide?"8px 16px":"5px 10px"}}>
               {curOp.emoji} {curOp.label}
             </button>
           </div>
@@ -639,7 +659,7 @@ export default function BabyTracker() {
                   {label:"うんち",value:`${todayCount("poo")+todayCount("pee_poo")}回`,sub:lastOf("poo")||lastOf("pee_poo")?timeSince(Math.max(lastOf("poo")?.timestamp||0,lastOf("pee_poo")?.timestamp||0)):"–",color:"#C8A870",emoji:"💩"},
                   {label:"体温",value:lastOf("temp")?`${lastOf("temp").value}℃`:"–",sub:lastOf("temp")?timeSince(lastOf("temp").timestamp):"未計測",color:"#FF8C8C",emoji:"🌡️"},
                 ].map(c=>(
-                  <div key={c.label} style={{border:`2px solid ${c.color}`,borderRadius:14,padding:wide?"12px 8px":"8px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"white"}}>
+                  <div key={c.label} style={{borderRadius:16,padding:wide?"12px 8px":"8px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:c.color+"22"}}>
                     <span style={{fontSize:wide?13:10,color:"#777",fontWeight:600}}>{c.emoji} {c.label}</span>
                     <span style={{fontSize:wide?24:16,fontWeight:800,color:c.color}}>{c.value}</span>
                     <span style={{fontSize:wide?12:9,color:"#AAA"}}>{c.sub}</span>
@@ -647,7 +667,7 @@ export default function BabyTracker() {
                 ))}
               </div>
             </div>
-            <div style={{...st.sleepCard,borderColor:SLEEP_C,background:"#F0EEFF",padding:wide?22:14,justifyContent:"space-between"}}>
+            <div style={{...st.sleepCard,border:"none",background:"linear-gradient(160deg,#EDE9FF,#DCD6FF)",padding:wide?22:16,justifyContent:"space-between"}}>
               <div style={{...st.sleepTop,...(wide?{flexDirection:"column",alignItems:"center",textAlign:"center",gap:8,flex:1,justifyContent:"center"}:{})}}>
                 <span style={{fontSize:wide?80:30}}>{isSleeping?"😴":"☀️"}</span>
                 <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:wide?"center":"flex-start"}}>
@@ -668,10 +688,10 @@ export default function BabyTracker() {
           </div>
           <div style={{...st.section,...(wide?{order:1}:{})}}>
             {Object.entries(CATS).map(([catKey,cat])=>(
-              <div key={catKey} style={{...st.catBlock,padding:wide?"0 0 20px":"0 0 12px",borderRadius:wide?20:14,background:cat.bg,border:`2px solid ${cat.color}55`,overflow:"hidden"}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,background:cat.color,color:"white",padding:wide?"12px 20px":"8px 12px"}}>
-                  <span style={{fontSize:wide?26:16}}>{cat.icon}</span>
-                  <span style={{fontSize:wide?22:13,fontWeight:800,letterSpacing:1}}>{cat.label}</span>
+              <div key={catKey} style={{...st.catBlock,padding:wide?"0 0 20px":"0 0 12px",borderRadius:wide?26:18,background:"white",overflow:"hidden"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,background:cat.bg,color:cat.color,padding:wide?"12px 20px":"9px 14px",borderBottom:`3px solid ${cat.color}`}}>
+                  <span style={{fontSize:wide?26:18}}>{cat.icon}</span>
+                  <span style={{fontSize:wide?20:14,fontWeight:900,letterSpacing:1}}>{cat.label}</span>
                 </div>
                 <div style={{padding:wide?"0 20px":"0 12px"}}>
                 <div style={{...st.catGrid,gridTemplateColumns:wide?"repeat(4,minmax(0,1fr))":"repeat(4,1fr)",gap:wide?14:8,marginTop:wide?16:10}}>
@@ -679,10 +699,10 @@ export default function BabyTracker() {
                     const done=justDone===item.key;
                     return (
                       <button key={item.key} onClick={()=>handleTap(item)}
-                        style={{...st.itemBtn,padding:wide?"22px 8px":"10px 4px",borderWidth:wide?3:1.5,borderRadius:wide?20:12,background:done?item.color:"white",borderColor:item.color,
-                          color:done?"white":item.color,transform:done?"scale(0.94)":"scale(1)"}}>
-                        <span style={{fontSize:wide?54:22,lineHeight:1}}>{item.emoji}</span>
-                        <span style={{fontSize:wide?26:11,fontWeight:800,marginTop:wide?10:2}}>{item.label}</span>
+                        style={{...st.itemBtn,padding:wide?"20px 8px":"12px 4px",borderWidth:0,borderRadius:wide?22:16,background:done?item.color:item.color+"22",
+                          color:done?"white":"#5A4A4A",transform:done?"scale(0.94)":"scale(1)",boxShadow:done?"none":"0 2px 0 "+item.color+"66"}}>
+                        <span style={{fontSize:wide?46:24,lineHeight:1}}>{item.emoji}</span>
+                        <span style={{fontSize:wide?22:12,fontWeight:900,marginTop:wide?8:3}}>{item.label}</span>
                         {(item.key==="milk"||item.key==="pumped")&&<span style={{fontSize:wide?16:9,opacity:.7,fontWeight:600}}>ml選択</span>}
                         {item.key!=="milk"&&item.key!=="pumped"&&<span style={{fontSize:wide?16:9,opacity:.6,fontWeight:600}}>{lastOf(item.key)?timeSince(lastOf(item.key).timestamp):"未記録"}</span>}
                       </button>
@@ -740,7 +760,7 @@ export default function BabyTracker() {
                 const isS=item.itemType==="sleep_start", isE=item.itemType==="sleep_end";
                 const it=isS?{emoji:"😴",label:"就寝",color:SLEEP_C}:isE?{emoji:"☀️",label:"起床",color:"#F4A261"}:itemByKey(item.key);
                 return (
-                  <div key={item.id} style={{display:"flex",alignItems:"center",gap:10,padding:wide?"8px 10px":"6px 8px",borderLeft:`4px solid ${it.color}`,background:"#FAFAF8",borderRadius:8}}>
+                  <div key={item.id} style={{display:"flex",alignItems:"center",gap:10,padding:wide?"8px 10px":"6px 8px",borderLeft:`4px solid ${it.color}`,background:"#F4FAFE",borderRadius:8}}>
                     <span style={{fontSize:wide?22:16}}>{it.emoji}</span>
                     <span style={{fontSize:wide?16:13,fontWeight:700,flex:1}}>
                       {it.label}
@@ -976,60 +996,60 @@ export default function BabyTracker() {
 }
 
 const st = {
-  app:      { minHeight:"100vh", background:"#FAFAF8", fontFamily:"'Hiragino Sans','Noto Sans JP',sans-serif", color:"#2D2D2D" },
-  alertBar: { background:"#FFF3CD", borderBottom:"1px solid #F0C040", padding:"8px 16px", display:"flex", gap:12, flexWrap:"wrap", fontSize:13 },
-  alertItem:{ fontWeight:600, color:"#856404" },
-  header:   { background:"white", borderBottom:"1px solid #EBEBEB", position:"sticky", top:0, zIndex:20 },
+  app:      { minHeight:"100vh", background:"#F4FAFE", fontFamily:"'Zen Maru Gothic','Hiragino Maru Gothic ProN','Hiragino Sans','Noto Sans JP',sans-serif", color:"#3A4A55" },
+  alertBar: { background:"#FFF1C9", padding:"8px 16px", display:"flex", gap:12, flexWrap:"wrap", fontSize:13 },
+  alertItem:{ fontWeight:700, color:"#8A6D1F" },
+  header:   { background:"linear-gradient(90deg,#7EC8F0,#A6DCF5)", position:"sticky", top:0, zIndex:20, boxShadow:"0 2px 10px rgba(100,170,220,.25)" },
   headerIn: { maxWidth:520, margin:"0 auto", padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" },
-  logo:     { fontSize:17, fontWeight:700 },
-  nav:      { display:"flex", gap:2 },
-  navBtn:   { padding:"5px 9px", border:"none", background:"transparent", borderRadius:20, fontSize:12, cursor:"pointer", color:"#888", fontWeight:500 },
-  navActive:{ background:"#EEEAE4", color:"#2D2D2D" },
-  opBtn:    { padding:"4px 9px", border:"1.5px solid", borderRadius:20, background:"white", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", fontFamily:"inherit" },
-  opTag:    { fontSize:10, fontWeight:700, color:"white", borderRadius:10, padding:"1px 7px", whiteSpace:"nowrap", display:"inline-block" },
-  opChoice: { border:"2px solid", borderRadius:14, padding:"14px 8px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:6, fontFamily:"inherit" },
-  opPopup:  { background:"white", borderRadius:18, width:"calc(100% - 32px)", maxWidth:360, padding:20, display:"flex", flexDirection:"column", gap:14, boxShadow:"0 12px 40px rgba(0,0,0,.25)" },
+  logo:     { fontSize:18, fontWeight:900, color:"white", textShadow:"0 1px 2px rgba(0,0,0,.1)" },
+  nav:      { display:"flex", gap:4, background:"rgba(255,255,255,.35)", borderRadius:24, padding:3 },
+  navBtn:   { padding:"6px 12px", border:"none", background:"transparent", borderRadius:20, fontSize:13, cursor:"pointer", color:"white", fontWeight:700, whiteSpace:"nowrap" },
+  navActive:{ background:"white", color:"#3E8FC7" },
+  opBtn:    { padding:"5px 10px", border:"2px solid", borderRadius:20, fontSize:11, fontWeight:900, cursor:"pointer", whiteSpace:"nowrap", boxShadow:"0 2px 6px rgba(0,0,0,.08)" },
+  opTag:    { fontSize:10, fontWeight:800, color:"white", borderRadius:10, padding:"1px 8px", whiteSpace:"nowrap", display:"inline-block" },
+  opChoice: { border:"3px solid", borderRadius:18, padding:"16px 8px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:6 },
+  opPopup:  { background:"white", borderRadius:24, width:"calc(100% - 32px)", maxWidth:380, padding:22, display:"flex", flexDirection:"column", gap:14, boxShadow:"0 16px 48px rgba(60,100,130,.25)" },
   main:     { maxWidth:520, margin:"0 auto", padding:14 },
   section:  { display:"flex", flexDirection:"column", gap:14 },
-  memoCard: { background:"#FFF8E1", border:"1.5px solid #F0D070", borderRadius:16, padding:14, display:"flex", flexDirection:"column", gap:8 },
+  memoCard: { background:"#FFF6D9", border:"none", borderRadius:24, padding:16, display:"flex", flexDirection:"column", gap:10, boxShadow:"0 4px 14px rgba(230,180,80,.18)" },
   whoGrid:   { display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 },
-  whoBtn:    { border:"2px solid", borderRadius:12, padding:"10px 6px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" },
-  memoEditBtn:{ background:"white", border:"1.5px solid #DDD", borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:600, cursor:"pointer", color:"#555", fontFamily:"inherit" },
-  sleepCard:{ border:"2px solid", borderRadius:16, padding:14, display:"flex", flexDirection:"column", gap:10 },
+  whoBtn:    { border:"3px solid", borderRadius:14, padding:"12px 6px", fontWeight:900, cursor:"pointer" },
+  memoEditBtn:{ background:"white", border:"2px solid #EADFC4", borderRadius:20, padding:"5px 14px", fontSize:12, fontWeight:800, cursor:"pointer", color:"#8A6D1F" },
+  sleepCard:{ border:"none", borderRadius:24, padding:16, display:"flex", flexDirection:"column", gap:12, boxShadow:"0 4px 14px rgba(124,111,205,.18)" },
   sleepTop: { display:"flex", alignItems:"center", gap:12 },
-  sleepBtns:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 },
-  sleepBtn: { border:"none", borderRadius:12, padding:12, fontSize:14, fontWeight:700, cursor:"pointer", color:"white", transition:"all .15s" },
-  catBlock: { background:"white", border:"1px solid #EBEBEB", borderRadius:14, padding:12, display:"flex", flexDirection:"column", gap:8 },
-  catLabel: { fontSize:12, fontWeight:700, letterSpacing:.5 },
+  sleepBtns:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 },
+  sleepBtn: { border:"none", borderRadius:16, padding:14, fontSize:15, fontWeight:900, cursor:"pointer", color:"white", transition:"all .15s", boxShadow:"0 3px 0 rgba(0,0,0,.12)" },
+  catBlock: { background:"white", border:"none", borderRadius:20, padding:12, display:"flex", flexDirection:"column", gap:8, boxShadow:"0 4px 14px rgba(120,170,210,.14)" },
+  catLabel: { fontSize:12, fontWeight:900, letterSpacing:.5 },
   catGrid:  { display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8 },
-  itemBtn:  { border:"1.5px solid", borderRadius:12, padding:"10px 4px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:2, transition:"all .15s", background:"white" },
-  manualToggle:{ background:"none", border:"1px dashed #CCC", borderRadius:10, padding:10, fontSize:13, color:"#888", cursor:"pointer", width:"100%" },
-  manualCard:  { background:"white", border:"1px solid #E8E8E8", borderRadius:14, padding:14, display:"flex", flexDirection:"column", gap:10 },
-  chipBtn:     { padding:"6px 10px", border:"1.5px solid #DDD", borderRadius:20, background:"white", cursor:"pointer", fontSize:12, fontWeight:600 },
-  input:       { width:"100%", padding:"10px 12px", border:"1.5px solid #E0E0E0", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit" },
-  inputLabel:  { fontSize:12, fontWeight:600, color:"#777" },
-  submitBtn:   { background:"#2D2D2D", color:"white", border:"none", borderRadius:10, padding:12, fontSize:15, fontWeight:700, cursor:"pointer" },
-  secTitle:  { fontSize:17, fontWeight:700, margin:0 },
-  empty:     { color:"#AAA", textAlign:"center", padding:32 },
+  itemBtn:  { border:"none", borderRadius:16, padding:"12px 4px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:2, transition:"all .15s" },
+  manualToggle:{ background:"white", border:"2px dashed #EBD3CA", borderRadius:16, padding:12, fontSize:14, color:"#8FA0AC", cursor:"pointer", width:"100%", fontWeight:700 },
+  manualCard:  { background:"white", border:"none", borderRadius:20, padding:16, display:"flex", flexDirection:"column", gap:10, boxShadow:"0 4px 14px rgba(120,170,210,.14)" },
+  chipBtn:     { padding:"7px 12px", border:"2px solid #EEE0DA", borderRadius:20, background:"white", cursor:"pointer", fontSize:13, fontWeight:800, color:"#3A4A55" },
+  input:       { width:"100%", padding:"12px 14px", border:"2px solid #EEE0DA", borderRadius:14, fontSize:15, outline:"none", boxSizing:"border-box", background:"#FBFDFF", color:"#3A4A55" },
+  inputLabel:  { fontSize:13, fontWeight:800, color:"#7A8A95" },
+  submitBtn:   { background:"#3E8FC7", color:"white", border:"none", borderRadius:14, padding:14, fontSize:16, fontWeight:900, cursor:"pointer", boxShadow:"0 3px 0 rgba(0,0,0,.12)" },
+  secTitle:  { fontSize:20, fontWeight:900, margin:0, color:"#3E8FC7" },
+  empty:     { color:"#AEBBC5", textAlign:"center", padding:32 },
   dateGroup: { display:"flex", flexDirection:"column", gap:6, breakInside:"avoid", marginBottom:14 },
   homeWide:  { display:"grid", gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)", gap:24, alignItems:"start", width:"100%" },
-  dateLabel: { fontSize:11, fontWeight:700, color:"#AAA", letterSpacing:.5, padding:"2px 0" },
-  row:       { background:"white", border:"1px solid #EEE", borderLeft:"4px solid", borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 },
+  dateLabel: { fontSize:13, fontWeight:900, color:"#3E8FC7", letterSpacing:.5, padding:"4px 10px", background:"#E3F2FC", borderRadius:20, alignSelf:"flex-start" },
+  row:       { background:"white", border:"none", borderLeft:"5px solid", borderRadius:14, padding:"11px 14px", display:"flex", alignItems:"center", gap:10, boxShadow:"0 2px 8px rgba(120,170,210,.12)" },
   rowInfo:   { flex:1, display:"flex", flexDirection:"column", gap:2 },
   rowRight:  { display:"flex", flexDirection:"column", alignItems:"flex-end", gap:3 },
-  rowTime:   { fontSize:12, color:"#888", whiteSpace:"nowrap" },
-  delBtn:    { background:"none", border:"none", color:"#CCC", cursor:"pointer", fontSize:16, padding:4 },
-  badge:     { marginLeft:6, fontSize:11, background:"#F0F0F0", borderRadius:6, padding:"1px 6px", color:"#555" },
-  settingRow:{ background:"white", border:"1px solid #EEE", borderRadius:12, padding:14, display:"flex", flexDirection:"column", gap:8 },
-  logRow:    { background:"#FAFAFA", borderLeft:"3px solid", borderRadius:6, padding:"6px 8px", display:"flex", alignItems:"center", gap:8 },
-  dangerZone:{ background:"#FFF5F5", border:"1px solid #FFE0E0", borderRadius:12, padding:14, display:"flex", flexDirection:"column", gap:8 },
-  dangerBtn: { background:"white", border:"1.5px solid #E74C3C", borderRadius:10, padding:10, color:"#E74C3C", fontSize:13, fontWeight:600, cursor:"pointer" },
-  overlay:   { position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:50, display:"flex", alignItems:"flex-end", justifyContent:"center" },
-  modal:     { background:"white", borderRadius:"20px 20px 0 0", width:"100%", maxWidth:520, maxHeight:"70vh", overflow:"auto", padding:20, display:"flex", flexDirection:"column", gap:0 },
-  modalTitle:{ fontSize:18, fontWeight:700, textAlign:"center", padding:"8px 0 12px" },
+  rowTime:   { fontSize:13, color:"#8FA0AC", whiteSpace:"nowrap", fontWeight:700 },
+  delBtn:    { background:"none", border:"none", color:"#C5D3DC", cursor:"pointer", fontSize:18, padding:4 },
+  badge:     { marginLeft:6, fontSize:12, background:"#E3F2FC", borderRadius:8, padding:"1px 8px", color:"#2B6FA3", fontWeight:800 },
+  settingRow:{ background:"white", border:"none", borderRadius:20, padding:16, display:"flex", flexDirection:"column", gap:10, boxShadow:"0 4px 14px rgba(120,170,210,.14)" },
+  logRow:    { background:"#F4FAFE", borderLeft:"4px solid", borderRadius:8, padding:"7px 10px", display:"flex", alignItems:"center", gap:8 },
+  dangerZone:{ background:"#FFF0F0", border:"none", borderRadius:20, padding:16, display:"flex", flexDirection:"column", gap:8 },
+  dangerBtn: { background:"white", border:"2px solid #E74C3C", borderRadius:12, padding:12, color:"#E74C3C", fontSize:14, fontWeight:800, cursor:"pointer" },
+  overlay:   { position:"fixed", inset:0, background:"rgba(40,70,90,.45)", zIndex:50, display:"flex", alignItems:"flex-end", justifyContent:"center", backdropFilter:"blur(2px)" },
+  modal:     { background:"white", borderRadius:"24px 24px 0 0", width:"100%", maxWidth:520, maxHeight:"70vh", overflow:"auto", padding:20, display:"flex", flexDirection:"column", gap:0 },
+  modalTitle:{ fontSize:20, fontWeight:900, textAlign:"center", padding:"8px 0 14px", color:"#3E8FC7" },
   mlList:    { display:"flex", flexDirection:"column" },
-  mlItem:    { padding:"14px 20px", border:"none", borderBottom:"1px solid #F0F0F0", background:"white", cursor:"pointer", fontSize:16, textAlign:"left" },
-  cancelBtn: { marginTop:8, padding:14, border:"none", background:"#F5F5F5", borderRadius:12, fontSize:15, fontWeight:600, cursor:"pointer", color:"#555" },
+  mlItem:    { padding:"15px 20px", border:"none", borderBottom:"1px solid #F5EDEA", background:"white", cursor:"pointer", fontSize:17, fontWeight:700, textAlign:"left", color:"#3A4A55" },
+  cancelBtn: { marginTop:8, padding:14, border:"none", background:"#EAF3F9", borderRadius:14, fontSize:15, fontWeight:800, cursor:"pointer", color:"#7A8A95" },
 };
 
 const SUMMARY_TABS = [
@@ -1164,18 +1184,18 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
   const tabItemDefs=TAB_ITEMS[tab]||[];
 
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:0,background:"#FAFAF8",minHeight:"100%"}}>
+    <div style={{display:"flex",flexDirection:"column",gap:0,background:"transparent",minHeight:"100%"}}>
       <div style={{display:"flex",overflowX:"auto",borderBottom:"1px solid #E0E0E0",background:"white",position:"sticky",top:wide?64:52,zIndex:10,borderRadius:wide?12:0}}>
         {SUMMARY_TABS.map(t=>(
           <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:"0 0 auto",padding:"10px 16px",border:"none",
             borderBottom:tab===t.key?"2.5px solid #4A90D9":"2.5px solid transparent",background:"transparent",
-            cursor:"pointer",fontSize:wide?18:14,padding:wide?"14px 28px":"10px 16px",color:tab===t.key?"#4A90D9":"#666",fontWeight:tab===t.key?700:400,fontFamily:"inherit"}}>{t.label}</button>
+            cursor:"pointer",fontSize:wide?18:14,padding:wide?"14px 28px":"10px 16px",color:tab===t.key?"#3E8FC7":"#666",fontWeight:tab===t.key?700:400,fontFamily:"inherit"}}>{t.label}</button>
         ))}
       </div>
       <div style={{display:"flex",margin:"10px 14px 6px",background:"#F0F0F0",borderRadius:20,padding:3}}>
         {[["time","時間"],["amount","量"]].map(([k,l])=>(
           <button key={k} onClick={()=>setMode(k)} style={{flex:1,padding:"6px 0",border:"none",borderRadius:17,
-            background:mode===k?"#4A90D9":"transparent",color:mode===k?"white":"#555",
+            background:mode===k?"#3E8FC7":"transparent",color:mode===k?"white":"#555",
             fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
         ))}
       </div>
