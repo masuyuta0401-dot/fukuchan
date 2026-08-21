@@ -561,9 +561,9 @@ export default function BabyTracker() {
           <div style={wide?st.homeWide:st.section}>
           <div style={{...st.section,...(wide?{order:2,gap:20}:{})}}>
             {/* 引き継ぎメモ */}
-            <div style={{...st.memoCard,padding:wide?24:14,gap:wide?14:8,borderWidth:wide?2.5:1.5}}>
+            <div style={{...st.memoCard,padding:wide?28:14,gap:wide?16:8,borderWidth:wide?2.5:1.5,...(wide?{minHeight:"calc(50vh - 70px)",boxSizing:"border-box"}:{})}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:wide?20:13,fontWeight:700,color:"#8A6D1F"}}>📝 引き継ぎメモ</span>
+                <span style={{fontSize:wide?26:13,fontWeight:800,color:"#8A6D1F"}}>📝 引き継ぎメモ</span>
                 {!memoEditing&&<button onClick={startMemoEdit} style={{...st.memoEditBtn,fontSize:wide?16:12,padding:wide?"10px 22px":"4px 12px",background:"#8A6D1F",color:"white",borderColor:"#8A6D1F"}}>＋ 新しく書く</button>}
               </div>
               {memoEditing==="who"&&(
@@ -598,7 +598,7 @@ export default function BabyTracker() {
                     <OpTag label={memoFrom}/> → <OpTag label={memoTo}/>
                     <button onClick={()=>setMemoEditing("who")} style={{...st.memoEditBtn,marginLeft:"auto"}}>変更</button>
                   </div>
-                  <textarea value={memoInput} onChange={e=>setMemoInput(e.target.value)} rows={wide?12:6}
+                  <textarea value={memoInput} onChange={e=>setMemoInput(e.target.value)} rows={wide?10:6}
                     placeholder={`${memoTo}へ\n例：17時にミルク120ml済み\nうんち少なめ、機嫌よし\n次は20時ごろミルク`}
                     style={{...st.input,resize:"vertical",fontSize:wide?17:15,lineHeight:1.6}} autoFocus/>
                   <div style={{display:"flex",gap:8}}>
@@ -608,7 +608,7 @@ export default function BabyTracker() {
                 </>
               )}
               {!memoEditing&&memos.length===0&&(
-                <div style={{fontSize:wide?18:14,color:"#AAA",padding:wide?"24px 0":"8px 0"}}>まだメモはありません。「新しく書く」から次の担当者への申し送りを残せます。</div>
+                <div style={{fontSize:wide?22:14,color:"#AAA",padding:wide?"40px 0":"8px 0",textAlign:wide?"center":"left"}}>まだメモはありません。「新しく書く」から次の担当者への申し送りを残せます。</div>
               )}
               {!memoEditing&&memos.map((m,i)=>(
                 <div key={m.id} style={{background:i===0?"white":"rgba(255,255,255,.55)",border:i===0?"2px solid #E8C860":"1px solid #EEDFA8",borderRadius:14,padding:wide?(i===0?20:14):12,display:"flex",flexDirection:"column",gap:8,opacity:i===0?1:.85}}>
@@ -621,10 +621,11 @@ export default function BabyTracker() {
                 </div>
               ))}
             </div>
+            <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"stretch"}:{display:"flex",flexDirection:"column",gap:14}}>
             {/* 今日のまとめ */}
             <div style={{background:"white",border:"1px solid #EBEBEB",borderRadius:wide?20:14,padding:wide?20:12,display:"flex",flexDirection:"column",gap:wide?12:8}}>
               <div style={{fontSize:wide?18:13,fontWeight:800,color:"#555"}}>📊 今日のまとめ</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:wide?10:6}}>
+              <div style={{display:"grid",gridTemplateColumns:wide?"repeat(2,1fr)":"repeat(3,1fr)",gap:wide?10:6,flex:1}}>
                 {[
                   {label:"ミルク",value:`${todayMl}ml`,sub:`${todayCount("milk")}回`,color:"#F4A261",emoji:"🍼"},
                   {label:"母乳",value:`${todayCount("breastfeed")}回`,sub:lastOf("breastfeed")?timeSince(lastOf("breastfeed").timestamp):"–",color:"#F08080",emoji:"🤱"},
@@ -641,22 +642,23 @@ export default function BabyTracker() {
                 ))}
               </div>
             </div>
-            <div style={{...st.sleepCard,borderColor:SLEEP_C,background:"#F0EEFF",padding:wide?22:14}}>
-              <div style={st.sleepTop}>
-                <span style={{fontSize:wide?52:30}}>{isSleeping?"😴":"☀️"}</span>
-                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+            <div style={{...st.sleepCard,borderColor:SLEEP_C,background:"#F0EEFF",padding:wide?22:14,justifyContent:"space-between"}}>
+              <div style={{...st.sleepTop,...(wide?{flexDirection:"column",alignItems:"center",textAlign:"center",gap:8,flex:1,justifyContent:"center"}:{})}}>
+                <span style={{fontSize:wide?80:30}}>{isSleeping?"😴":"☀️"}</span>
+                <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:wide?"center":"flex-start"}}>
                   <span style={{fontSize:wide?16:13,fontWeight:600,color:"#555"}}>睡眠</span>
                   <span style={{fontSize:wide?22:15,fontWeight:700,color:isSleeping?SLEEP_C:"#444"}}>
                     {isSleeping?`就寝中 · ${fmtDur(Date.now()-isSleeping.start)} 経過`:`今日 ${todaySleepMs>0?fmtDur(todaySleepMs):"0分"}`}
                   </span>
                 </div>
               </div>
-              <div style={st.sleepBtns}>
+              <div style={{...st.sleepBtns,...(wide?{gridTemplateColumns:"1fr",gap:10}:{})}}>
                 <button onClick={()=>startSleep()} disabled={!!isSleeping}
-                  style={{...st.sleepBtn,padding:wide?18:12,fontSize:wide?18:14,background:!isSleeping?SLEEP_C:"#CCC",opacity:isSleeping?.45:1}}>😴 寝た</button>
+                  style={{...st.sleepBtn,padding:wide?22:12,fontSize:wide?22:14,background:!isSleeping?SLEEP_C:"#CCC",opacity:isSleeping?.45:1}}>😴 寝た</button>
                 <button onClick={()=>endSleep()} disabled={!isSleeping}
-                  style={{...st.sleepBtn,padding:wide?18:12,fontSize:wide?18:14,background:isSleeping?"#F4A261":"#CCC",opacity:!isSleeping?.45:1}}>☀️ 起きた</button>
+                  style={{...st.sleepBtn,padding:wide?22:12,fontSize:wide?22:14,background:isSleeping?"#F4A261":"#CCC",opacity:!isSleeping?.45:1}}>☀️ 起きた</button>
               </div>
+            </div>
             </div>
           </div>
           <div style={{...st.section,...(wide?{order:1}:{})}}>
