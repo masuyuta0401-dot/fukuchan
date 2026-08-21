@@ -91,13 +91,13 @@ async function loadLogs() {
 // ─── 引き継ぎメモ ─────────────────────────────────────────────────
 async function loadMemo() {
   const data = await sbFetch("memos?id=eq.family", { headers: { "Prefer": "" } });
-  return data && data[0] ? data[0] : { content: "", operator: null, updated_at: null };
+  return data && data[0] ? data[0] : { content: "", operator: null, updated_at: null, from_op: null, to_op: null };
 }
 
-async function saveMemoDb(content, operator) {
+async function saveMemoDb(content, operator, from_op, to_op) {
   await sbFetch("memos?id=eq.family", {
     method: "PATCH",
-    body: JSON.stringify({ content, operator, updated_at: new Date().toISOString() }),
+    body: JSON.stringify({ content, operator, from_op, to_op, updated_at: new Date().toISOString() }),
   });
 }
 
@@ -293,9 +293,11 @@ export default function BabyTracker() {
   useEffect(()=>{ opRef.current = operator; },[operator]);
 
   // 引き継ぎメモ
-  const [memo, setMemo]           = useState({ content:"", operator:null, updated_at:null });
-  const [memoEditing, setMemoEditing] = useState(false);
+  const [memo, setMemo]           = useState({ content:"", operator:null, updated_at:null, from_op:null, to_op:null });
+  const [memoEditing, setMemoEditing] = useState(false);   // false | "who" | "write"
   const [memoInput, setMemoInput] = useState("");
+  const [memoFrom, setMemoFrom]   = useState(null);
+  const [memoTo, setMemoTo]       = useState(null);
   const [memoSaving, setMemoSaving] = useState(false);
 
   // 操作ログ
@@ -461,17 +463,22 @@ export default function BabyTracker() {
     setManualOpen(false); setManualKey(null); setManualTime(""); setManualMl(null); setManualVal(""); setManualNote("");
   };
 
-  const startMemoEdit = () => { setMemoInput(memo.content||""); setMemoEditing(true); };
+  const startMemoEdit = () => {
+    setMemoInput(memo.content||"");
+    setMemoFrom(opRef.current);
+    setMemoTo(memo.to_op && memo.to_op!==opRef.current ? memo.to_op : null);
+    setMemoEditing("who");
+  };
   const saveMemo = async() => {
     const op = opRef.current;
     const content = memoInput.trim();
     setMemoSaving(true);
-    await saveMemoDb(content, op);
+    await saveMemoDb(content, op, memoFrom, memoTo);
     const now = new Date().toISOString();
-    setMemo({ content, operator: op, updated_at: now });
+    setMemo({ content, operator: op, updated_at: now, from_op: memoFrom, to_op: memoTo });
     setMemoEditing(false);
     setMemoSaving(false);
-    addLog(op, "memo_update", "family", { content });
+    addLog(op, "memo_update", "family", { content, from: memoFrom, to: memoTo });
   };
 
   const clearRecords = async() => {
@@ -506,7 +513,7 @@ export default function BabyTracker() {
   const OpTag = ({ label }) => {
     if(!label) return null;
     const o = opByLabel(label);
-    return <span style={{...st.opTag, background:o.color}}>{o.emoji} {o.label}</span>;
+    return <span style={{...st.opTag, background:o.color, fontSize:wide?13:10, padding:wide?"3px 10px":"1px 7px"}}>{o.emoji} {o.label}</span>;
   };
 
   if(loading) return(
@@ -530,8 +537,8 @@ export default function BabyTracker() {
         </div>
       )}
       <header style={st.header}>
-        <div style={{...st.headerIn,maxWidth:wide?"none":520,padding:wide?"12px 32px":"10px 14px"}}>
-          <span style={st.logo}>🍼 ふくちゃん</span>
+        <div style={{...st.headerIn,maxWidth:wide?"none":520,padding:wide?"12px 20px":"10px 14px"}}>
+          <span style={{...st.logo,fontSize:wide?22:17}}>🍼 ふくちゃん</span>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             <nav style={st.nav}>
               {[["home","記録"],["history","履歴"],["summary","グラフ"],["settings","設定"]].map(([v,l])=>(
@@ -545,45 +552,81 @@ export default function BabyTracker() {
           </div>
         </div>
       </header>
-      <main style={{...st.main,maxWidth:wide?"none":520,padding:wide?"24px 32px":14}}>
+      <main style={{...st.main,maxWidth:wide?"none":520,padding:wide?"20px 20px":14,width:"100%",boxSizing:"border-box"}}>
         {view==="home"&&(
           <div style={wide?st.homeWide:st.section}>
           <div style={{...st.section,...(wide?{position:"sticky",top:72,alignSelf:"start",order:2}:{})}}>
             {/* 引き継ぎメモ */}
-            <div style={st.memoCard}>
+            <div style={{...st.memoCard,padding:wide?24:14,gap:wide?14:8}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:13,fontWeight:700,color:"#8A6D1F"}}>📝 引き継ぎメモ</span>
-                {!memoEditing&&<button onClick={startMemoEdit} style={st.memoEditBtn}>{memo.content?"編集":"書く"}</button>}
+                <span style={{fontSize:wide?20:13,fontWeight:700,color:"#8A6D1F"}}>📝 引き継ぎメモ</span>
+                {!memoEditing&&<button onClick={startMemoEdit} style={{...st.memoEditBtn,fontSize:wide?15:12,padding:wide?"8px 18px":"4px 12px"}}>{memo.content?"編集":"書く"}</button>}
               </div>
-              {memoEditing?(
+              {memoEditing==="who"&&(
                 <>
-                  <textarea value={memoInput} onChange={e=>setMemoInput(e.target.value)} rows={wide?8:5}
-                    placeholder="次の担当者へ（例：17時にミルク120ml済み。うんち少なめ、機嫌よし）"
-                    style={{...st.input,resize:"vertical",fontSize:14,lineHeight:1.5}} autoFocus/>
+                  <div style={{fontSize:wide?15:12,fontWeight:700,color:"#8A6D1F"}}>だれから</div>
+                  <div style={st.whoGrid}>
+                    {OPERATORS.map(o=>(
+                      <button key={o.label} onClick={()=>setMemoFrom(o.label)}
+                        style={{...st.whoBtn,borderColor:o.color,background:memoFrom===o.label?o.color:"white",color:memoFrom===o.label?"white":o.color,fontSize:wide?15:12}}>
+                        {o.emoji} {o.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{fontSize:wide?15:12,fontWeight:700,color:"#8A6D1F"}}>だれへ</div>
+                  <div style={st.whoGrid}>
+                    {OPERATORS.map(o=>(
+                      <button key={o.label} onClick={()=>setMemoTo(o.label)}
+                        style={{...st.whoBtn,borderColor:o.color,background:memoTo===o.label?o.color:"white",color:memoTo===o.label?"white":o.color,fontSize:wide?15:12}}>
+                        {o.emoji} {o.label}
+                      </button>
+                    ))}
+                  </div>
                   <div style={{display:"flex",gap:8}}>
-                    <button onClick={saveMemo} disabled={memoSaving} style={{...st.submitBtn,flex:1,background:"#8A6D1F",padding:10}}>{memoSaving?"保存中...":"保存する"}</button>
-                    <button onClick={()=>setMemoEditing(false)} style={{...st.cancelBtn,marginTop:0,flex:1,padding:10}}>キャンセル</button>
+                    <button onClick={()=>setMemoEditing("write")} disabled={!memoFrom||!memoTo} style={{...st.submitBtn,flex:1,background:"#8A6D1F",padding:wide?14:10,fontSize:wide?17:15,opacity:(!memoFrom||!memoTo)?.4:1}}>次へ：内容を書く →</button>
+                    <button onClick={()=>setMemoEditing(false)} style={{...st.cancelBtn,marginTop:0,padding:wide?14:10}}>キャンセル</button>
                   </div>
                 </>
-              ):(
+              )}
+              {memoEditing==="write"&&(
                 <>
-                  <div style={{fontSize:14,lineHeight:1.6,whiteSpace:"pre-wrap",color:memo.content?"#2D2D2D":"#AAA"}}>
-                    {memo.content||"まだメモはありません。次の担当者への申し送りを残せます。"}
+                  <div style={{fontSize:wide?16:13,fontWeight:700,color:"#555",display:"flex",alignItems:"center",gap:8}}>
+                    <OpTag label={memoFrom}/> → <OpTag label={memoTo}/>
+                    <button onClick={()=>setMemoEditing("who")} style={{...st.memoEditBtn,marginLeft:"auto"}}>変更</button>
                   </div>
-                  {memo.updated_at&&(
-                    <div style={{fontSize:11,color:"#999",display:"flex",alignItems:"center",gap:6}}>
-                      <OpTag label={memo.operator}/> {fmtDateTime(memo.updated_at)} 更新
+                  <textarea value={memoInput} onChange={e=>setMemoInput(e.target.value)} rows={wide?12:6}
+                    placeholder={`${memoTo}へ\n例：17時にミルク120ml済み\nうんち少なめ、機嫌よし\n次は20時ごろミルク`}
+                    style={{...st.input,resize:"vertical",fontSize:wide?17:15,lineHeight:1.6}} autoFocus/>
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={saveMemo} disabled={memoSaving} style={{...st.submitBtn,flex:1,background:"#8A6D1F",padding:wide?14:10,fontSize:wide?17:15}}>{memoSaving?"保存中...":"保存する"}</button>
+                    <button onClick={()=>setMemoEditing(false)} style={{...st.cancelBtn,marginTop:0,padding:wide?14:10}}>キャンセル</button>
+                  </div>
+                </>
+              )}
+              {!memoEditing&&(
+                <>
+                  {(memo.from_op||memo.to_op)&&memo.content&&(
+                    <div style={{display:"flex",alignItems:"center",gap:8,fontSize:wide?16:13,fontWeight:700,color:"#555"}}>
+                      <OpTag label={memo.from_op}/> → <OpTag label={memo.to_op}/>
+                    </div>
+                  )}
+                  <div style={{fontSize:wide?18:14,lineHeight:1.7,whiteSpace:"pre-wrap",color:memo.content?"#2D2D2D":"#AAA",minHeight:wide?120:0}}>
+                    {memo.content||"まだメモはありません。「書く」から次の担当者への申し送りを残せます。"}
+                  </div>
+                  {memo.updated_at&&memo.content&&(
+                    <div style={{fontSize:wide?13:11,color:"#999",display:"flex",alignItems:"center",gap:6}}>
+                      <OpTag label={memo.operator}/> が {fmtDateTime(memo.updated_at)} に更新
                     </div>
                   )}
                 </>
               )}
             </div>
-            <div style={{...st.sleepCard,borderColor:SLEEP_C,background:"#F0EEFF"}}>
+            <div style={{...st.sleepCard,borderColor:SLEEP_C,background:"#F0EEFF",padding:wide?22:14}}>
               <div style={st.sleepTop}>
-                <span style={{fontSize:30}}>{isSleeping?"😴":"☀️"}</span>
+                <span style={{fontSize:wide?52:30}}>{isSleeping?"😴":"☀️"}</span>
                 <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                  <span style={{fontSize:13,fontWeight:600,color:"#555"}}>睡眠</span>
-                  <span style={{fontSize:15,fontWeight:700,color:isSleeping?SLEEP_C:"#444"}}>
+                  <span style={{fontSize:wide?16:13,fontWeight:600,color:"#555"}}>睡眠</span>
+                  <span style={{fontSize:wide?22:15,fontWeight:700,color:isSleeping?SLEEP_C:"#444"}}>
                     {isSleeping?`就寝中 · ${fmtDur(Date.now()-isSleeping.start)} 経過`:`今日 ${todaySleepMs>0?fmtDur(todaySleepMs):"0分"}`}
                   </span>
                 </div>
@@ -599,25 +642,25 @@ export default function BabyTracker() {
           <div style={{...st.section,...(wide?{order:1}:{})}}>
             {Object.entries(CATS).map(([catKey,cat])=>(
               <div key={catKey} style={{...st.catBlock,padding:wide?20:12,borderRadius:wide?20:14}}>
-                <div style={{...st.catLabel,color:cat.color,fontSize:wide?18:12}}>{cat.label}</div>
-                <div style={{...st.catGrid,gridTemplateColumns:wide?"repeat(5,1fr)":"repeat(4,1fr)",gap:wide?16:8}}>
+                <div style={{...st.catLabel,color:cat.color,fontSize:wide?22:12}}>{cat.label}</div>
+                <div style={{...st.catGrid,gridTemplateColumns:wide?"repeat(5,minmax(0,1fr))":"repeat(4,1fr)",gap:wide?18:8}}>
                   {cat.items.map((item)=>{
                     const done=justDone===item.key;
                     return (
                       <button key={item.key} onClick={()=>handleTap(item)}
-                        style={{...st.itemBtn,padding:wide?"28px 10px":"10px 4px",borderWidth:wide?2.5:1.5,borderRadius:wide?20:12,background:done?item.color:"white",borderColor:item.color,
+                        style={{...st.itemBtn,padding:wide?"34px 10px":"10px 4px",borderWidth:wide?3:1.5,borderRadius:wide?24:12,background:done?item.color:"white",borderColor:item.color,
                           color:done?"white":item.color,transform:done?"scale(0.94)":"scale(1)"}}>
-                        <span style={{fontSize:wide?56:22}}>{item.emoji}</span>
-                        <span style={{fontSize:wide?20:11,fontWeight:700,marginTop:wide?8:2}}>{item.label}</span>
-                        {(item.key==="milk"||item.key==="pumped")&&<span style={{fontSize:wide?13:9,opacity:.6}}>ml選択</span>}
-                        {item.key!=="milk"&&item.key!=="pumped"&&<span style={{fontSize:wide?13:9,opacity:.5}}>{lastOf(item.key)?timeSince(lastOf(item.key).timestamp):"未記録"}</span>}
+                        <span style={{fontSize:wide?72:22,lineHeight:1}}>{item.emoji}</span>
+                        <span style={{fontSize:wide?24:11,fontWeight:700,marginTop:wide?12:2}}>{item.label}</span>
+                        {(item.key==="milk"||item.key==="pumped")&&<span style={{fontSize:wide?15:9,opacity:.6}}>ml選択</span>}
+                        {item.key!=="milk"&&item.key!=="pumped"&&<span style={{fontSize:wide?15:9,opacity:.5}}>{lastOf(item.key)?timeSince(lastOf(item.key).timestamp):"未記録"}</span>}
                       </button>
                     );
                   })}
                 </div>
               </div>
             ))}
-            <button onClick={()=>setManualOpen(v=>!v)} style={st.manualToggle}>✏️ 時刻を指定して記録</button>
+            <button onClick={()=>setManualOpen(v=>!v)} style={{...st.manualToggle,fontSize:wide?16:13,padding:wide?14:10}}>✏️ 時刻を指定して記録</button>
             {manualOpen&&(
               <div style={st.manualCard}>
                 <p style={{margin:0,fontSize:13,color:"#888"}}>項目を選んで時刻を入力</p>
@@ -644,7 +687,7 @@ export default function BabyTracker() {
                 <button onClick={submitManual} style={st.submitBtn} disabled={!manualKey||!manualTime}>記録する</button>
               </div>
             )}
-            <button onClick={()=>setSleepManual(v=>!v)} style={st.manualToggle}>✏️ 睡眠を時刻指定で記録</button>
+            <button onClick={()=>setSleepManual(v=>!v)} style={{...st.manualToggle,fontSize:wide?16:13,padding:wide?14:10}}>✏️ 睡眠を時刻指定で記録</button>
             {sleepManual&&(
               <div style={st.manualCard}>
                 <label style={st.inputLabel}>😴 寝た時刻（必須）</label>
@@ -722,7 +765,7 @@ export default function BabyTracker() {
           </div>
         )}
         {view==="summary"&&(
-          <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} />
+          <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} wide={wide} />
         )}
         {view==="settings"&&(
           <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}:st.section}>
@@ -883,6 +926,8 @@ const st = {
   main:     { maxWidth:520, margin:"0 auto", padding:14 },
   section:  { display:"flex", flexDirection:"column", gap:14 },
   memoCard: { background:"#FFF8E1", border:"1.5px solid #F0D070", borderRadius:16, padding:14, display:"flex", flexDirection:"column", gap:8 },
+  whoGrid:   { display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 },
+  whoBtn:    { border:"2px solid", borderRadius:12, padding:"10px 6px", fontWeight:700, cursor:"pointer", fontFamily:"inherit" },
   memoEditBtn:{ background:"white", border:"1.5px solid #DDD", borderRadius:20, padding:"4px 12px", fontSize:12, fontWeight:600, cursor:"pointer", color:"#555", fontFamily:"inherit" },
   sleepCard:{ border:"2px solid", borderRadius:16, padding:14, display:"flex", flexDirection:"column", gap:10 },
   sleepTop: { display:"flex", alignItems:"center", gap:12 },
@@ -901,7 +946,7 @@ const st = {
   secTitle:  { fontSize:17, fontWeight:700, margin:0 },
   empty:     { color:"#AAA", textAlign:"center", padding:32 },
   dateGroup: { display:"flex", flexDirection:"column", gap:6, breakInside:"avoid", marginBottom:14 },
-  homeWide:  { display:"grid", gridTemplateColumns:"1fr 440px", gap:28, alignItems:"start" },
+  homeWide:  { display:"grid", gridTemplateColumns:"minmax(0,1fr) minmax(420px,28%)", gap:24, alignItems:"start", width:"100%" },
   dateLabel: { fontSize:11, fontWeight:700, color:"#AAA", letterSpacing:.5, padding:"2px 0" },
   row:       { background:"white", border:"1px solid #EEE", borderLeft:"4px solid", borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 },
   rowInfo:   { flex:1, display:"flex", flexDirection:"column", gap:2 },
@@ -939,12 +984,96 @@ function get7Days() {
   return days;
 }
 
-function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C }) {
+// ─── 比較（前週比・前月比） ───────────────────────────────────────
+function sumRange(records, sleep, from, to) {
+  const inR = (ts) => ts>=from && ts<to;
+  const rs = records.filter(r=>inR(r.timestamp));
+  const milk = rs.filter(r=>r.key==="milk").reduce((a,r)=>a+(r.ml||0),0);
+  const pumped = rs.filter(r=>r.key==="pumped").reduce((a,r)=>a+(r.ml||0),0);
+  const bf = rs.filter(r=>r.key==="breastfeed").length;
+  const pee = rs.filter(r=>r.key==="pee"||r.key==="pee_poo").length;
+  const poo = rs.filter(r=>r.key==="poo"||r.key==="pee_poo").length;
+  const slpMin = Math.round(sleep.filter(s=>s.end&&inR(s.start)).reduce((a,s)=>a+(s.end-s.start),0)/60000);
+  const temps = rs.filter(r=>r.key==="temp").map(r=>parseFloat(r.value)).filter(v=>!isNaN(v));
+  const temp = temps.length? Math.round(temps.reduce((a,v)=>a+v,0)/temps.length*10)/10 : null;
+  const days = Math.max(1, Math.round((to-from)/86400000));
+  return { milk, pumped, bf, pee, poo, slpMin, temp, days };
+}
+function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x.getTime(); }
+function getComparePeriods() {
+  const now = Date.now();
+  const tomorrow = startOfDay(now) + 86400000;
+  const weekFrom = tomorrow - 7*86400000;
+  const prevWeekFrom = weekFrom - 7*86400000;
+  const d = new Date();
+  const monthFrom = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+  const elapsed = tomorrow - monthFrom;
+  const prevMonthFrom = new Date(d.getFullYear(), d.getMonth()-1, 1).getTime();
+  return {
+    week:  { cur:[weekFrom, tomorrow], prev:[prevWeekFrom, weekFrom], label:"直近7日", prevLabel:"その前の7日" },
+    month: { cur:[monthFrom, tomorrow], prev:[prevMonthFrom, prevMonthFrom+elapsed], label:"今月（1日〜今日）", prevLabel:"前月の同じ日数" },
+  };
+}
+const COMPARE_METRICS = {
+  nursing:   [{k:"milk",label:"ミルク",unit:"ml",color:"#F4A261"},{k:"pumped",label:"搾母乳",unit:"ml",color:"#FFB347"},{k:"bf",label:"母乳",unit:"回",color:"#F08080"}],
+  sleep:     [{k:"slpMin",label:"睡眠",unit:"分",color:"#7C6FCD",dur:true}],
+  excretion: [{k:"pee",label:"おしっこ",unit:"回",color:"#4ECDC4"},{k:"poo",label:"うんち",unit:"回",color:"#C8A870"}],
+  health:    [{k:"temp",label:"平均体温",unit:"℃",color:"#FF8C8C",avg:true}],
+  all:       [{k:"milk",label:"ミルク",unit:"ml",color:"#F4A261"},{k:"bf",label:"母乳",unit:"回",color:"#F08080"},{k:"pee",label:"おしっこ",unit:"回",color:"#4ECDC4"},{k:"poo",label:"うんち",unit:"回",color:"#C8A870"},{k:"slpMin",label:"睡眠",unit:"分",color:"#7C6FCD",dur:true}],
+};
+function fmtMetric(v, m, fmtDur) {
+  if(v==null) return "–";
+  if(m.dur) return fmtDur(v*60000);
+  return `${v}${m.unit}`;
+}
+function CompareCard({ title, sub, cur, prev, metrics, fmtDur, wide }) {
+  return (
+    <div style={{background:"white",border:"1px solid #E8E8E8",borderRadius:12,overflow:"hidden"}}>
+      <div style={{padding:wide?"12px 16px":"10px 12px",borderBottom:"1px solid #F0F0F0",display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+        <span style={{fontSize:wide?16:14,fontWeight:700}}>{title}</span>
+        <span style={{fontSize:wide?12:10,color:"#999"}}>{sub}</span>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 1fr 1fr",fontSize:wide?11:10,color:"#999",padding:wide?"6px 16px":"6px 12px",borderBottom:"1px solid #F5F5F5"}}>
+        <span/><span style={{textAlign:"right"}}>今回</span><span style={{textAlign:"right"}}>前回</span><span style={{textAlign:"right"}}>増減</span>
+      </div>
+      {metrics.map(m=>{
+        const c=cur[m.k], p=prev[m.k];
+        const perDayC = m.avg||c==null ? c : Math.round(c/cur.days*10)/10;
+        const perDayP = m.avg||p==null ? p : Math.round(p/prev.days*10)/10;
+        let diffTxt="–", diffColor="#999";
+        if(c!=null&&p!=null){
+          if(m.avg){ const d=Math.round((c-p)*10)/10; diffTxt=(d>0?"+":"")+d+m.unit; diffColor=d>0?"#E74C3C":d<0?"#2E86DE":"#999"; }
+          else if(p>0){ const pct=Math.round((c-p)/p*100); diffTxt=(pct>0?"+":"")+pct+"%"; diffColor=pct>0?"#27AE60":pct<0?"#E67E22":"#999"; }
+          else if(c>0){ diffTxt="NEW"; diffColor="#27AE60"; }
+        }
+        return (
+          <div key={m.k} style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 1fr 1fr",alignItems:"center",padding:wide?"10px 16px":"8px 12px",borderBottom:"1px solid #F5F5F5",fontSize:wide?15:13}}>
+            <span style={{fontWeight:600,color:m.color}}>{m.label}</span>
+            <span style={{textAlign:"right",fontWeight:700}}>{fmtMetric(c,m,fmtDur)}{!m.avg&&c!=null&&<span style={{display:"block",fontSize:wide?10:9,color:"#AAA",fontWeight:400}}>1日 {fmtMetric(perDayC,m,fmtDur)}</span>}</span>
+            <span style={{textAlign:"right",color:"#777"}}>{fmtMetric(p,m,fmtDur)}{!m.avg&&p!=null&&<span style={{display:"block",fontSize:wide?10:9,color:"#BBB"}}>1日 {fmtMetric(perDayP,m,fmtDur)}</span>}</span>
+            <span style={{textAlign:"right",fontWeight:700,color:diffColor}}>{diffTxt}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C, wide }) {
   const [tab, setTab] = useState("nursing");
   const [mode, setMode] = useState("time");
   const days = get7Days();
   const today = new Date().toDateString();
-  const HOUR_H=18, COL_W=44, LEFT_W=28, BAR_MAX_H=100;
+  const vw = typeof window!=="undefined" ? window.innerWidth : 520;
+  const LEFT_W = wide?36:28;
+  const COL_W = wide ? Math.max(44, Math.floor((vw - 40 - 28 - LEFT_W - 2) / 7)) : 44;
+  const HOUR_H = wide?28:18, BAR_MAX_H = wide?180:100;
+  const periods = getComparePeriods();
+  const weekCur = sumRange(records, sleep, ...periods.week.cur);
+  const weekPrev = sumRange(records, sleep, ...periods.week.prev);
+  const monthCur = sumRange(records, sleep, ...periods.month.cur);
+  const monthPrev = sumRange(records, sleep, ...periods.month.prev);
+  const cmpMetrics = COMPARE_METRICS[tab]||[];
 
   const amountData = days.map(d=>{
     const ds=d.toDateString(), label=`${d.getMonth()+1}/${d.getDate()}`, isToday=ds===today;
@@ -970,11 +1099,11 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:0,background:"#FAFAF8",minHeight:"100%"}}>
-      <div style={{display:"flex",overflowX:"auto",borderBottom:"1px solid #E0E0E0",background:"white",position:"sticky",top:52,zIndex:10}}>
+      <div style={{display:"flex",overflowX:"auto",borderBottom:"1px solid #E0E0E0",background:"white",position:"sticky",top:wide?64:52,zIndex:10,borderRadius:wide?12:0}}>
         {SUMMARY_TABS.map(t=>(
           <button key={t.key} onClick={()=>setTab(t.key)} style={{flex:"0 0 auto",padding:"10px 16px",border:"none",
             borderBottom:tab===t.key?"2.5px solid #4A90D9":"2.5px solid transparent",background:"transparent",
-            cursor:"pointer",fontSize:14,color:tab===t.key?"#4A90D9":"#666",fontWeight:tab===t.key?700:400,fontFamily:"inherit"}}>{t.label}</button>
+            cursor:"pointer",fontSize:wide?18:14,padding:wide?"14px 28px":"10px 16px",color:tab===t.key?"#4A90D9":"#666",fontWeight:tab===t.key?700:400,fontFamily:"inherit"}}>{t.label}</button>
         ))}
       </div>
       <div style={{display:"flex",margin:"10px 14px 6px",background:"#F0F0F0",borderRadius:20,padding:3}}>
@@ -1072,11 +1201,17 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
               {label:"体温",value:amountData[6].temp?`${amountData[6].temp}℃`:"–",color:"#FF8C8C"},
             ].map(({label,value,color})=>(
               <div key={label} style={{border:`2px solid ${color}`,borderRadius:12,padding:"10px 8px",display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"white"}}>
-                <span style={{fontSize:10,color:"#777"}}>{label}</span>
-                <span style={{fontSize:17,fontWeight:700,color}}>{value}</span>
+                <span style={{fontSize:wide?13:10,color:"#777"}}>{label}</span>
+                <span style={{fontSize:wide?24:17,fontWeight:700,color}}>{value}</span>
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {cmpMetrics.length>0&&(
+        <div style={{margin:"16px 14px 20px",display:"grid",gridTemplateColumns:wide?"1fr 1fr":"1fr",gap:14}}>
+          <CompareCard title="📅 前週比" sub={`${periods.week.label} vs ${periods.week.prevLabel}`} cur={weekCur} prev={weekPrev} metrics={cmpMetrics} fmtDur={fmtDur} wide={wide}/>
+          <CompareCard title="🗓 前月比" sub={`${periods.month.label} vs ${periods.month.prevLabel}`} cur={monthCur} prev={monthPrev} metrics={cmpMetrics} fmtDur={fmtDur} wide={wide}/>
         </div>
       )}
     </div>
