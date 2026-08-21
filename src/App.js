@@ -132,6 +132,8 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
+const APP_VERSION = "v2.3";
+
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
 const SLEEP_SK = "bt_sleep";
@@ -542,7 +544,7 @@ export default function BabyTracker() {
       )}
       <header style={st.header}>
         <div style={{...st.headerIn,maxWidth:wide?"none":520,padding:wide?"12px 20px":"10px 14px"}}>
-          <span style={{...st.logo,fontSize:wide?22:17}}>🍼 ふくちゃん</span>
+          <span style={{...st.logo,fontSize:wide?22:17}}>🍼 ふくちゃん <span style={{fontSize:11,color:"#BBB",fontWeight:500}}>{APP_VERSION}</span></span>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             <nav style={st.nav}>
               {[["home","記録"],["history","履歴"],["summary","グラフ"],["settings","設定"]].map(([v,l])=>(
