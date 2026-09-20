@@ -107,13 +107,6 @@ async function addLog(operator, action, targetId, detail) {
   });
 }
 
-async function loadLogs() {
-  const data = await sbFetch("logs?user_id=eq.family&order=created_at.desc&limit=150", {
-    headers: { "Prefer": "" }
-  });
-  return data || [];
-}
-
 // ─── 引き継ぎメモ ─────────────────────────────────────────────────
 async function loadMemos() {
   const data = await sbFetch("memos?content=neq.&order=updated_at.desc&limit=3", { headers: { "Prefer": "" } });
@@ -192,7 +185,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v4.3";
+const APP_VERSION = "v4.6";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -209,18 +202,6 @@ const OPERATORS = [
 ];
 const opByLabel = (label) => OPERATORS.find(o=>o.label===label) || { label: label||"？", emoji:"👤", color:"#999" };
 
-const ACTION_LABELS = {
-  add_record:    "記録",
-  delete_record: "記録を削除",
-  sleep_start:   "就寝",
-  sleep_end:     "起床",
-  sleep_manual:  "睡眠を手動記録",
-  delete_sleep:  "睡眠を削除",
-  memo_update:   "引き継ぎメモを更新",
-  clear_records: "記録を全削除",
-  clear_sleep:   "睡眠記録を全削除",
-  operator_change:"操作者を変更",
-};
 
 const CATS = {
   nursing: {
@@ -422,8 +403,6 @@ export default function BabyTracker() {
   },[]);
 
   // 操作ログ
-  const [logs, setLogs] = useState([]);
-  const [logsLoading, setLogsLoading] = useState(false);
 
   const isSleeping = sleep.find(s=>!s.end)||null;
   useTick(!!isSleeping);
@@ -462,12 +441,6 @@ export default function BabyTracker() {
     }, 30000);
     return()=>clearInterval(id);
   },[memoEditing]);
-
-  // 設定タブを開いたときにログを読み込む
-  useEffect(()=>{
-    if(view!=="settings") return;
-    (async()=>{ setLogsLoading(true); setLogs(await loadLogs()); setLogsLoading(false); })();
-  },[view]);
 
   useEffect(()=>{ localStorage.setItem(REM_SK,JSON.stringify(reminders)); },[reminders]);
 
@@ -1045,23 +1018,15 @@ export default function BabyTracker() {
                     {pushPerm==="granted"?"許可済み":pushPerm==="denied"?"ブロック中":pushPerm==="unsupported"?"非対応":"未設定"}
                   </span>
                 </div>
-                {pushPerm==="denied"&&(
-                  <div style={{background:"#FFF0F0",border:"2px solid #F3C0C0",borderRadius:12,padding:wide?14:10,fontSize:wide?14:12,lineHeight:1.8,color:"#8A4040"}}>
-                    <b>端末側でブロックされています。</b>アプリからは出し直せないので、下の手順で解除してください。<br/><br/>
-                    <b>iPhone</b><br/>
-                    設定アプリ →（一番下の方の）<b>千隼くん</b> → 通知 → 「通知を許可」をオン<br/>
-                    見つからない場合：ホーム画面のアイコンを削除 → Safariで開き直して「ホーム画面に追加」→ もう一度このボタンを押す<br/><br/>
-                    <b>Android</b><br/>
-                    設定 → アプリ → Chrome（またはこのアプリ）→ 通知 → オン
-                  </div>
-                )}
-                <p style={{margin:0,fontSize:wide?14:12,color:"#7A8A95"}}>通知の受け取りには一度だけ許可が必要です。iPhoneはホーム画面に追加したアイコンから開いて押してください。何度押しても大丈夫です。</p>
+                <p style={{margin:0,fontSize:wide?14:12,color:"#7A8A95"}}>{pushPerm==="denied"
+                  ? "端末側でブロックされています。ブラウザのアドレスバー左のアイコン（🔒/ⓘ）→ 権限 → 通知 →「許可」にしてから、もう一度押してください。"
+                  : "通知の受け取りには一度だけ許可が必要です。iPhoneはホーム画面に追加したアイコンから開いて押してください。何度押しても大丈夫です。"}</p>
                 <div style={{display:"flex",gap:8}}>
                   <button
                     onClick={()=>{
                       if(typeof Notification!=="undefined" && Notification.permission==="denied"){
                         setPushPerm("denied");
-                        alert("端末の設定で通知がブロックされています。\n上の赤い枠の手順で解除してから、もう一度押してください。");
+                        alert("端末側で通知がブロックされています。\n\nAndroid（Chrome）\nアドレスバー左の 🔒 または ⓘ をタップ → 権限 → 通知 →「許可」\n\niPhone\n設定アプリ → 千隼くん → 通知 →「通知を許可」をオン\n\n解除したら、もう一度このボタンを押してください。");
                         return;
                       }
                       subscribePush(operator)
@@ -1093,41 +1058,6 @@ export default function BabyTracker() {
             </div>
           </div>
           <div style={st.section}>
-            {/* 操作ログ */}
-            <div style={st.settingRow}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <h3 style={{margin:0,fontSize:wide?16:13,color:"#555"}}>📋 操作ログ（誰が・いつ・何を）</h3>
-                <button onClick={async()=>{ setLogsLoading(true); setLogs(await loadLogs()); setLogsLoading(false); }} style={st.memoEditBtn}>更新</button>
-              </div>
-              {logsLoading&&<p style={{margin:0,fontSize:12,color:"#AAA"}}>読み込み中...</p>}
-              {!logsLoading&&logs.length===0&&<p style={{margin:0,fontSize:12,color:"#AAA"}}>まだ操作ログはありません</p>}
-              <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:wide?520:360,overflowY:"auto"}}>
-                {logs.map(l=>{
-                  const o=opByLabel(l.operator);
-                  const d=l.detail||{};
-                  let desc=ACTION_LABELS[l.action]||l.action;
-                  if(l.action==="add_record"||l.action==="delete_record"){
-                    desc+=`：${d.label||""}`;
-                    if(d.ml!=null) desc+=` ${d.ml}ml`;
-                    if(d.value!=null) desc+=` ${d.value}${d.unit||""}`;
-                    if(d.note) desc+=`（${d.note}）`;
-                    if(d.timestamp) desc+=` @${fmt(d.timestamp)}`;
-                  }
-                  if(l.action==="sleep_end"&&d.duration_min!=null) desc+=`（${fmtDur(d.duration_min*60000)}）`;
-                  if(l.action==="memo_update") desc+=`：${(d.content||"").slice(0,30)}${(d.content||"").length>30?"…":""}`;
-                  if(l.action==="operator_change") desc+=`：${d.from}→${d.to}`;
-                  const isDel=l.action.startsWith("delete")||l.action.startsWith("clear");
-                  return (
-                    <div key={l.id} style={{...st.logRow,borderLeftColor:isDel?"#E74C3C":o.color}}>
-                      <span style={{...st.opTag,background:o.color,flexShrink:0}}>{o.emoji} {o.label}</span>
-                      <span style={{flex:1,fontSize:wide?15:12,color:isDel?"#C0392B":"#333"}}>{desc}</span>
-                      <span style={{fontSize:wide?13:10,color:"#999",whiteSpace:"nowrap"}}>{fmtDateTime(l.created_at)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
             <div style={st.dangerZone}>
               <h3 style={{margin:0,fontSize:13,color:"#C0392B"}}>データ管理</h3>
               <button onClick={clearRecords} style={st.dangerBtn}>🗑️ 記録をすべて削除</button>
@@ -1353,9 +1283,81 @@ function CompareCard({ title, sub, cur, prev, metrics, fmtDur, wide }) {
   );
 }
 
+// ─── 24時間の時計グラフ ───────────────────────────────────────────
+function polar(cx, cy, r, deg) {
+  const rad = (deg - 90) * Math.PI / 180;
+  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+}
+function PieClock({ size, color, segs, emptyText }) {
+  const cx = size/2, cy = size/2, R = size/2 - 24;
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} style={{width:"100%",display:"block"}}>
+      <circle cx={cx} cy={cy} r={R} fill="#FFFFFF" stroke="#DCE9F2" strokeWidth="1.5"/>
+      {[...Array(24)].map((_,h)=>{
+        const major = h%3===0;
+        const [x1,y1]=polar(cx,cy,R,h*15);
+        const [x2,y2]=polar(cx,cy,R-(major?8:4),h*15);
+        return <line key={h} x1={x1} y1={y1} x2={x2} y2={y2} stroke={major?"#C6DCEC":"#EAF2F8"} strokeWidth="1"/>;
+      })}
+      {segs.map((sg,i)=>{
+        if(sg.a2-sg.a1>=359.9) return <circle key={i} cx={cx} cy={cy} r={R} fill={color} opacity="0.85"/>;
+        const [x1,y1]=polar(cx,cy,R,sg.a1);
+        const [x2,y2]=polar(cx,cy,R,sg.a2);
+        const large=(sg.a2-sg.a1)%360>180?1:0;
+        return <path key={i} d={`M ${cx} ${cy} L ${x1} ${y1} A ${R} ${R} 0 ${large} 1 ${x2} ${y2} Z`} fill={color} opacity="0.85"/>;
+      })}
+      <circle cx={cx} cy={cy} r={R} fill="none" stroke="#DCE9F2" strokeWidth="1.5"/>
+      {emptyText&&<text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={size*0.062} fill="#AEBBC5" fontWeight="700">{emptyText}</text>}
+      {[0,3,6,9,12,15,18,21].map(h=>{
+        const [x,y]=polar(cx,cy,R+13,h*15);
+        return <text key={h} x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={size*0.052} fontWeight="700" fill="#9BACB8">{h}</text>;
+      })}
+    </svg>
+  );
+}
+
+function TempLine({ size, points, color }) {
+  const W = size, H = size;
+  const padL = size*0.17, padR = size*0.06, padT = size*0.09, padB = size*0.13;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const vals = points.map(p=>p.v);
+  let lo = vals.length ? Math.min(...vals) : 36.0;
+  let hi = vals.length ? Math.max(...vals) : 37.5;
+  lo = Math.floor((lo-0.3)*2)/2; hi = Math.ceil((hi+0.3)*2)/2;
+  if (hi-lo < 1) hi = lo + 1;
+  const X = (h) => padL + (h/24)*innerW;
+  const Y = (v) => padT + (1-(v-lo)/(hi-lo))*innerH;
+  const ticks = []; for(let v=lo; v<=hi+0.001; v+=0.5) ticks.push(Math.round(v*10)/10);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",display:"block"}}>
+      {ticks.map(v=>(
+        <g key={v}>
+          <line x1={padL} y1={Y(v)} x2={W-padR} y2={Y(v)} stroke="#EAF2F8" strokeWidth="1"/>
+          <text x={padL-4} y={Y(v)} textAnchor="end" dominantBaseline="central" fontSize={size*0.05} fill="#9BACB8" fontWeight="700">{v.toFixed(1)}</text>
+        </g>
+      ))}
+      {[0,6,12,18,24].map(h=>(
+        <text key={h} x={X(h)} y={H-padB+size*0.075} textAnchor="middle" fontSize={size*0.05} fill="#9BACB8" fontWeight="700">{h}</text>
+      ))}
+      <line x1={padL} y1={H-padB} x2={W-padR} y2={H-padB} stroke="#DCE9F2" strokeWidth="1.5"/>
+      {points.length>1&&(
+        <polyline fill="none" stroke={color} strokeWidth={size*0.016} strokeLinejoin="round" strokeLinecap="round"
+          points={points.map(p=>`${X(p.h)},${Y(p.v)}`).join(" ")}/>
+      )}
+      {points.map((p,i)=>(
+        <circle key={i} cx={X(p.h)} cy={Y(p.v)} r={size*0.026} fill={color} stroke="white" strokeWidth={size*0.012}/>
+      ))}
+      {points.length===0&&(
+        <text x={W/2} y={H/2} textAnchor="middle" dominantBaseline="central" fontSize={size*0.062} fill="#AEBBC5" fontWeight="700">記録なし</text>
+      )}
+    </svg>
+  );
+}
+
 function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C, wide, zoom=1 }) {
   const [tab, setTab] = useState("nursing");
-  const [mode, setMode] = useState("time");
+  const [mode, setMode] = useState("clock");
+  const [dayOffset, setDayOffset] = useState(0); // 0=今日, -1=昨日 ...
   const days = get7Days();
   const today = new Date().toDateString();
   const vw = typeof window!=="undefined" ? window.innerWidth/zoom : 520;
@@ -1368,25 +1370,6 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
   const monthCur = sumRange(records, sleep, ...periods.month.cur);
   const monthPrev = sumRange(records, sleep, ...periods.month.prev);
   const cmpMetrics = COMPARE_METRICS[tab]||[];
-
-  const amountData = days.map(d=>{
-    const ds=d.toDateString(), label=`${d.getMonth()+1}/${d.getDate()}`, isToday=ds===today;
-    const milk=records.filter(r=>r.key==="milk"&&new Date(r.timestamp).toDateString()===ds).reduce((a,r)=>a+(r.ml||0),0);
-    const bf=records.filter(r=>r.key==="breastfeed"&&new Date(r.timestamp).toDateString()===ds).length;
-    const pee=records.filter(r=>(r.key==="pee"||r.key==="pee_poo")&&new Date(r.timestamp).toDateString()===ds).length;
-    const poo=records.filter(r=>(r.key==="poo"||r.key==="pee_poo")&&new Date(r.timestamp).toDateString()===ds).length;
-    const slpMin=Math.round(sleep.filter(s=>s.end&&new Date(s.start).toDateString()===ds).reduce((a,s)=>a+(s.end-s.start),0)/60000);
-    const temps=records.filter(r=>r.key==="temp"&&new Date(r.timestamp).toDateString()===ds);
-    const temp=temps.length?parseFloat(temps[temps.length-1].value):null;
-    return{label,isToday,milk,bf,pee,poo,slpMin,temp};
-  });
-
-  const maxVal=(()=>{
-    if(tab==="nursing") return Math.max(...amountData.map(d=>Math.max(d.milk,d.bf*30)),1);
-    if(tab==="excretion") return Math.max(...amountData.map(d=>Math.max(d.pee,d.poo)),1);
-    if(tab==="sleep") return Math.max(...amountData.map(d=>d.slpMin),1);
-    return 1;
-  })();
 
   const timeToY=(ts)=>{ const d=new Date(ts); return(d.getHours()+d.getMinutes()/60)*HOUR_H; };
   const tabItemDefs=TAB_ITEMS[tab]||[];
@@ -1401,7 +1384,7 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
         ))}
       </div>
       <div style={{display:"flex",margin:"10px 14px 6px",background:"#F0F0F0",borderRadius:20,padding:3}}>
-        {[["time","時間"],["amount","量"]].map(([k,l])=>(
+        {[["clock","🕐 1日の時計"],["time","📅 7日タイムライン"]].map(([k,l])=>(
           <button key={k} onClick={()=>setMode(k)} style={{flex:1,padding:"6px 0",border:"none",borderRadius:17,
             background:mode===k?"#3E8FC7":"transparent",color:mode===k?"white":"#555",
             fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
@@ -1450,58 +1433,79 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
           </div>
         </div>
       )}
-      {mode==="amount"&&(
-        <div style={{margin:"0 14px",display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{background:"white",border:"1px solid #E8E8E8",borderRadius:12,overflow:"hidden"}}>
-            <div style={{display:"flex",borderBottom:"1px solid #E8E8E8"}}>
-              <div style={{width:LEFT_W,flexShrink:0}}/>
-              {days.map((d,i)=>{ const isT=d.toDateString()===today; return(
-                <div key={i} style={{width:COL_W,flexShrink:0,textAlign:"center",padding:"6px 2px",fontSize:11,fontWeight:isT?700:400,color:isT?"#E03030":"#666"}}>{d.getMonth()+1}/{d.getDate()}</div>
-              );})}
+      {mode==="clock"&&(()=>{
+        const base = new Date(); base.setHours(0,0,0,0);
+        const dayStart = base.getTime() + dayOffset*86400000;
+        const dayEnd = dayStart + 86400000;
+        const inDay = (ts)=> ts>=dayStart && ts<dayEnd;
+        const dLabel = dayOffset===0?"今日":dayOffset===-1?"昨日":new Intl.DateTimeFormat("ja-JP",{month:"numeric",day:"numeric"}).format(new Date(dayStart));
+        const WEDGE = 9; // 点の記録の扇の幅（度）≒36分
+        const degOfTs = (ts)=>{ const d=new Date(ts); return (d.getHours()+d.getMinutes()/60)/24*360; };
+        const pointSegs = (keys)=> records
+          .filter(r=>keys.includes(r.key)&&inDay(r.timestamp))
+          .map(r=>{ const d=degOfTs(r.timestamp); return { a1:d-WEDGE/2, a2:d+WEDGE/2 }; });
+        const sleepSegs = sleep.filter(sp=>sp.end&&sp.end>dayStart&&sp.start<dayEnd).map(sp=>{
+          const s1=Math.max(sp.start,dayStart), s2=Math.min(sp.end,dayEnd);
+          let a1=(s1-dayStart)/86400000*360, a2=(s2-dayStart)/86400000*360;
+          if(a2-a1<1.5) a2=a1+1.5;
+          return { a1, a2 };
+        });
+        const cnt = (keys)=>records.filter(r=>keys.includes(r.key)&&inDay(r.timestamp)).length;
+        const mlSum = (key)=>records.filter(r=>r.key===key&&inDay(r.timestamp)).reduce((x,r)=>x+(r.ml||0),0);
+        const daySleepMs = sleep.filter(sp=>sp.end&&sp.end>dayStart&&sp.start<dayEnd)
+          .reduce((x,sp)=>x+(Math.min(sp.end,dayEnd)-Math.max(sp.start,dayStart)),0);
+        const tempPts = records.filter(r=>r.key==="temp"&&inDay(r.timestamp))
+          .map(r=>{ const d=new Date(r.timestamp); return { h:d.getHours()+d.getMinutes()/60, v:parseFloat(r.value) }; })
+          .filter(p=>!isNaN(p.v)).sort((x,y)=>x.h-y.h);
+
+        const ALL_CARDS = {
+          milk:       { title:"🍼 ミルク",   color:"#F4A261", segs:()=>pointSegs(["milk"]),          sub:()=>`${mlSum("milk")}ml・${cnt(["milk"])}回` },
+          pumped:     { title:"🥛 搾母乳",   color:"#FFB347", segs:()=>pointSegs(["pumped"]),        sub:()=>`${mlSum("pumped")}ml・${cnt(["pumped"])}回` },
+          breastfeed: { title:"🤱 母乳",     color:"#F08080", segs:()=>pointSegs(["breastfeed"]),    sub:()=>`${cnt(["breastfeed"])}回` },
+          pee:        { title:"💧 おしっこ", color:"#4ECDC4", segs:()=>pointSegs(["pee","pee_poo"]), sub:()=>`${cnt(["pee","pee_poo"])}回` },
+          poo:        { title:"💩 うんち",   color:"#C8A870", segs:()=>pointSegs(["poo","pee_poo"]), sub:()=>`${cnt(["poo","pee_poo"])}回` },
+          sleep:      { title:"😴 睡眠",     color:SLEEP_C,   segs:()=>sleepSegs,                    sub:()=>daySleepMs>0?fmtDur(daySleepMs):"0分" },
+          temp:       { title:"🌡️ 体温",    color:"#FF8C8C", line:true,                             sub:()=>tempPts.length?`${tempPts[tempPts.length-1].v}℃`:"記録なし" },
+        };
+        const TAB_CARDS = {
+          nursing:   ["milk","pumped","breastfeed"],
+          sleep:     ["sleep"],
+          excretion: ["pee","poo"],
+          health:    ["temp"],
+          all:       ["milk","breastfeed","pee","poo","sleep","temp"],
+        };
+        const keys = TAB_CARDS[tab]||TAB_CARDS.all;
+        const cols = wide ? 3 : 2;
+        const pxSize = wide ? 230 : 190;
+
+        return (
+          <div style={{margin:"0 14px",display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
+              <button onClick={()=>setDayOffset(o=>o-1)} style={{border:"none",background:"white",borderRadius:12,padding:wide?"10px 18px":"8px 14px",fontSize:wide?18:15,fontWeight:900,cursor:"pointer",color:"#3E8FC7",boxShadow:"0 2px 8px rgba(120,170,210,.14)"}}>◀</button>
+              <span style={{fontSize:wide?22:17,fontWeight:900,minWidth:wide?110:80,textAlign:"center"}}>{dLabel}</span>
+              <button onClick={()=>setDayOffset(o=>Math.min(0,o+1))} disabled={dayOffset===0}
+                style={{border:"none",background:"white",borderRadius:12,padding:wide?"10px 18px":"8px 14px",fontSize:wide?18:15,fontWeight:900,cursor:"pointer",color:dayOffset===0?"#CFE0EA":"#3E8FC7",boxShadow:"0 2px 8px rgba(120,170,210,.14)"}}>▶</button>
             </div>
-            <div style={{display:"flex",alignItems:"flex-end",height:BAR_MAX_H+16,padding:"8px 0 4px",borderBottom:"1px solid #F0F0F0"}}>
-              <div style={{width:LEFT_W,flexShrink:0}}/>
-              {amountData.map((d,i)=>{
-                const vals=tab==="nursing"?[{v:d.milk,c:"#F4A261"},{v:d.bf*30,c:"#F08080"}]
-                  :tab==="excretion"?[{v:d.pee,c:"#4ECDC4"},{v:d.poo,c:"#C8A870"}]
-                  :tab==="sleep"?[{v:d.slpMin,c:SLEEP_C}]
-                  :tab==="health"?[{v:d.temp||0,c:"#FF8C8C"}]
-                  :[{v:d.milk,c:"#F4A261"}];
-                return(
-                  <div key={i} style={{width:COL_W,flexShrink:0,display:"flex",justifyContent:"center",alignItems:"flex-end",gap:2,height:BAR_MAX_H}}>
-                    {vals.map((v,j)=>{ const h=Math.round((v.v/maxVal)*BAR_MAX_H);
-                      return h>0?<div key={j} style={{width:12,height:h,background:v.c,borderRadius:"3px 3px 0 0",opacity:d.isToday?1:.75}}/>
-                        :<div key={j} style={{width:12,height:2,background:"#EEE",borderRadius:2}}/>;
-                    })}
+            <div style={{display:"grid",gridTemplateColumns:`repeat(${cols},minmax(0,1fr))`,gap:wide?14:10,paddingBottom:8}}>
+              {keys.map(k=>{
+                const c = ALL_CARDS[k];
+                const segs = c.line ? [] : c.segs();
+                return (
+                  <div key={k} style={{background:"white",borderRadius:18,padding:wide?14:12,boxShadow:"0 4px 14px rgba(120,170,210,.14)",display:"flex",flexDirection:"column",gap:6}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:6}}>
+                      <span style={{fontSize:wide?16:13,fontWeight:900,color:c.color,whiteSpace:"nowrap"}}>{c.title}</span>
+                      <span style={{fontSize:wide?13:11,fontWeight:800,color:"#7A8A95",whiteSpace:"nowrap"}}>{c.sub()}</span>
+                    </div>
+                    {c.line
+                      ? <TempLine size={pxSize} points={tempPts} color={c.color}/>
+                      : <PieClock size={pxSize} color={c.color} segs={segs} emptyText={segs.length?null:"記録なし"}/>}
                   </div>
                 );
               })}
             </div>
-            <div style={{display:"flex"}}>
-              <div style={{width:LEFT_W,flexShrink:0}}/>
-              {amountData.map((d,i)=>{
-                const val=tab==="nursing"?`${d.milk}ml`:tab==="excretion"?`${d.pee}回`:tab==="sleep"?`${d.slpMin}m`:tab==="health"?(d.temp?`${d.temp}℃`:"–"):`${d.milk}`;
-                return <div key={i} style={{width:COL_W,flexShrink:0,textAlign:"center",fontSize:9,color:d.isToday?"#E03030":"#888",padding:"4px 0",fontWeight:d.isToday?700:400}}>{val}</div>;
-              })}
-            </div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,paddingBottom:8}}>
-            {[
-              {label:"ミルク",value:`${amountData[6].milk}ml`,color:"#F4A261"},
-              {label:"母乳",value:`${amountData[6].bf}回`,color:"#F08080"},
-              {label:"おしっこ",value:`${amountData[6].pee}回`,color:"#4ECDC4"},
-              {label:"うんち",value:`${amountData[6].poo}回`,color:"#C8A870"},
-              {label:"睡眠",value:todaySleepMs>0?fmtDur(todaySleepMs):"0分",color:SLEEP_C},
-              {label:"体温",value:amountData[6].temp?`${amountData[6].temp}℃`:"–",color:"#FF8C8C"},
-            ].map(({label,value,color})=>(
-              <div key={label} style={{border:`2px solid ${color}`,borderRadius:12,padding:"10px 8px",display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"white"}}>
-                <span style={{fontSize:wide?13:10,color:"#777"}}>{label}</span>
-                <span style={{fontSize:wide?24:17,fontWeight:700,color}}>{value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        );
+      })()}
       {cmpMetrics.length>0&&(
         <div style={{margin:"16px 14px 20px",display:"grid",gridTemplateColumns:wide?"1fr 1fr":"1fr",gap:14}}>
           <CompareCard title="📅 前週比" sub={`${periods.week.label} vs ${periods.week.prevLabel}`} cur={weekCur} prev={weekPrev} metrics={cmpMetrics} fmtDur={fmtDur} wide={wide}/>
