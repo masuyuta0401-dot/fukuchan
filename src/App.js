@@ -155,12 +155,17 @@ async function subscribePush(operator, { ask = true } = {}) {
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: VAPID_PUBLIC_KEY });
   }
   // 操作者名と紐づけて保存（操作者を切り替えた場合も再登録）
-  await fetch('/api/subscribe', {
+  const res = await fetch('/api/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ operator: operator || 'unknown', subscription: sub }),
   });
-  return sub;
+  if (!res.ok) {
+    const text = await res.text().catch(()=> '');
+    throw new Error(`サーバー登録に失敗（${res.status}）\n${text.slice(0,200)}`);
+  }
+  const json = await res.json().catch(()=>null);
+  return { sub, info: json };
 }
 
 async function sendPush({ to, title, body, dedupeKey, ttl }) {
@@ -170,8 +175,12 @@ async function sendPush({ to, title, body, dedupeKey, ttl }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ to, title, body, dedupeKey, ttl }),
     });
+    if (!r.ok) {
+      const text = await r.text().catch(()=> '');
+      return { ok: false, status: r.status, error: text.slice(0, 300) };
+    }
     return await r.json();
-  } catch (e) { console.log('push error', e); return null; }
+  } catch (e) { console.log('push error', e); return { ok:false, error: String(e) }; }
 }
 
 // ─── GAS ────────────────────────────────────────────────────────
@@ -183,7 +192,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v4.0";
+const APP_VERSION = "v4.2";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -468,8 +477,8 @@ export default function BabyTracker() {
             const it = itemByKey(k);
             sendPush({
               to: targets,
-              title: `🐥 千隼くん：${it.label}の時間`,
-              body: `前回の${it.label}から${Math.floor(diff/60)>0?`${Math.floor(diff/60)}時間`:""}${Math.floor(diff%60)}分経ちました`,
+              title: `${it.emoji} ${it.label}の時間です`,
+              body: `前回から${Math.floor(diff/60)>0?`${Math.floor(diff/60)}時間`:""}${Math.floor(diff%60)}分たちました`,
               dedupeKey: `${k}:${last.timestamp}`,
               ttl: Math.max(600, mins*60),
             });
@@ -1018,12 +1027,19 @@ export default function BabyTracker() {
                 <p style={{margin:0,fontSize:wide?14:12,color:"#7A8A95"}}>この端末（{curOp.emoji} {curOp.label}）で通知を受け取るには、一度だけ許可が必要です。iPhoneはホーム画面に追加したアイコンから開いて押してください。</p>
                 <div style={{display:"flex",gap:8}}>
                   <button
-                    onClick={()=>subscribePush(operator).then(s=>alert(s?`${curOp.label}の端末として通知を登録しました`:"通知が許可されませんでした")).catch(()=>alert("通知の登録に失敗しました"))}
+                    onClick={()=>subscribePush(operator)
+                      .then(r=>alert(r?`${curOp.label}の端末として通知を登録しました（登録済み端末: ${r.info&&r.info.devices!=null?r.info.devices:"?"}台）`:"通知が許可されませんでした。iPhoneはホーム画面のアイコンから開いてください"))
+                      .catch(e=>alert("通知の登録に失敗しました\n"+(e&&e.message?e.message:e)))}
                     style={{...st.submitBtn,flex:1,padding:wide?14:12,fontSize:wide?16:14}}>
                     🔔 この端末で通知を許可する
                   </button>
                   <button
-                    onClick={()=>sendPush({ to:[operator], title:"🐥 千隼くん", body:"テスト通知です。届いていればOK！" }).then(r=>alert(r&&r.sent>0?`${curOp.label}に送信しました（${r.sent}台）`:"送信先がありません。先に「通知を許可する」を押してください"))}
+                    onClick={()=>sendPush({ to:[operator], title:"🐥 テスト通知", body:"届いていればOKです" }).then(r=>{
+                      if(!r) { alert("サーバーに接続できませんでした"); return; }
+                      if(r.sent>0) { alert(`${curOp.label}に送信しました（${r.sent}台）`); return; }
+                      if(r.ok===false) { alert(`サーバーエラー（${r.status||"?"}）\n${r.error||""}`); return; }
+                      alert(`送信できませんでした\n送信先:${r.skipped||"なし"} 失敗:${r.failed||0}\n先に「この端末で通知を許可する」を押してください`);
+                    })}
                     style={{...st.cancelBtn,marginTop:0,padding:wide?14:12,fontSize:wide?16:14}}>
                     テスト送信
                   </button>
