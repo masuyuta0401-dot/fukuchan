@@ -1,10 +1,10 @@
 {
-  "short_name": "千隼",
-  "name": "千隼 育児記録",
+  "short_name": "千隼くん",
+  "name": "千隼くん 育児記録",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#FAFAF8",
-  "theme_color": "#F4A261",
+  "background_color": "#F4FAFE",
+  "theme_color": "#7EC8F0",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
