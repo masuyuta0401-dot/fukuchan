@@ -4,20 +4,46 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const SUPABASE_URL = "https://edkhaaijlicwfqfmalff.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVka2hhYWlqbGljd2ZxZm1hbGZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMTgzNTksImV4cCI6MjA5MTU5NDM1OX0.Hq5aNZluv3oVq6IaD3EaAqqDougpFwyQYUie8ixfgi0";
 
+const FETCH_TIMEOUT = 10000; // 10秒で打ち切る（サーバー停止時に固まらないように）
+
 async function sbFetch(path, options={}) {
   if (!SUPABASE_URL || !SUPABASE_KEY) return null;
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    ...options,
-    headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": "return=minimal",
-      ...(options.headers||{}),
-    },
-  });
-  if (!res.ok) return null;
-  try { return await res.json(); } catch { return null; }
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>ctrl.abort(), FETCH_TIMEOUT);
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      ...options,
+      signal: ctrl.signal,
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+        ...(options.headers||{}),
+      },
+    });
+    if (!res.ok) return null;
+    try { return await res.json(); } catch { return null; }
+  } catch (e) {
+    console.log("supabase error:", path, e.name);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// サーバーに繋がるかだけ確認する（停止・圏外の判定用）
+async function checkConnection() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>ctrl.abort(), FETCH_TIMEOUT);
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/records?select=id&limit=1`, {
+      signal: ctrl.signal,
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` },
+    });
+    return res.ok;
+  } catch { return false; }
+  finally { clearTimeout(timer); }
 }
 
 async function loadRecords() {
@@ -157,7 +183,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v3.8";
+const APP_VERSION = "v3.9";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -337,6 +363,8 @@ export default function BabyTracker() {
     setNotifyTargets(prev=>{ const next = prev.includes(label) ? prev.filter(x=>x!==label) : [...prev,label]; saveSettingsDb({ notify_targets: next }); return next; });
   };
   const [loading, setLoading] = useState(true);
+  const [connError, setConnError] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
   const [view, setView]       = useState("home");
   const [mlModal, setMlModal] = useState(null);
   const [valModal, setValModal]= useState(null);
@@ -387,6 +415,9 @@ export default function BabyTracker() {
   useEffect(()=>{
     (async()=>{
       setLoading(true);
+      setConnError(false);
+      const ok = await checkConnection();
+      if(!ok){ setConnError(true); setLoading(false); return; }
       const [recs, slps, m, cfg] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings()]);
       if(cfg){ if(cfg.reminders && Object.keys(cfg.reminders).length) setRemLocal(cfg.reminders); if(Array.isArray(cfg.notify_targets)) setNotifyTargets(cfg.notify_targets); }
       setRecords(mapRecs(recs));
@@ -395,7 +426,7 @@ export default function BabyTracker() {
       setMemos(m);
       setLoading(false);
     })();
-  },[]);
+  },[retryTick]);
 
   // 30秒ごとに最新データを取得（他デバイスの更新を反映）
   useEffect(()=>{
@@ -609,9 +640,24 @@ export default function BabyTracker() {
   };
 
   if(loading) return(
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F4FAFE",flexDirection:"column",gap:12}}>
-      <div style={{fontSize:56}}>🐣</div>
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F4FAFE",flexDirection:"column",gap:12,fontFamily:"'Zen Maru Gothic','Hiragino Maru Gothic ProN',sans-serif"}}>
+      <div style={{fontSize:56}}>🐥</div>
       <div style={{fontSize:16,color:"#888"}}>データを読み込み中...</div>
+    </div>
+  );
+
+  if(connError) return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F4FAFE",flexDirection:"column",gap:14,padding:24,textAlign:"center",fontFamily:"'Zen Maru Gothic','Hiragino Maru Gothic ProN',sans-serif",color:"#3A4A55"}}>
+      <div style={{fontSize:56}}>😵</div>
+      <div style={{fontSize:19,fontWeight:900}}>サーバーにつながりません</div>
+      <div style={{fontSize:14,color:"#7A8A95",lineHeight:1.8,maxWidth:420}}>
+        電波を確認しても直らないときは、<br/>Supabaseが一時停止している可能性があります。<br/>
+        パソコンでSupabaseを開き「Resume project」を押すと復旧します。
+      </div>
+      <button onClick={()=>setRetryTick(t=>t+1)}
+        style={{background:"#3E8FC7",color:"white",border:"none",borderRadius:14,padding:"14px 32px",fontSize:16,fontWeight:900,cursor:"pointer",boxShadow:"0 3px 0 rgba(0,0,0,.12)",fontFamily:"inherit"}}>
+        🔄 もう一度ためす
+      </button>
     </div>
   );
 
