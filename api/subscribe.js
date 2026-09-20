@@ -12,7 +12,18 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const subscription = req.body;
-  await redis.set('push_subscription', JSON.stringify(subscription));
-  res.status(200).json({ ok: true });
+  const body = req.body || {};
+  const operator = body.operator || 'unknown';
+  const subscription = body.subscription || body;
+  if (!subscription || !subscription.endpoint) {
+    return res.status(400).json({ ok: false, error: 'no subscription' });
+  }
+
+  const key = `push_subs:${operator}`;
+  const existing = (await redis.get(key)) || {};
+  const subs = typeof existing === 'string' ? JSON.parse(existing) : existing;
+  subs[subscription.endpoint] = subscription;
+  await redis.set(key, JSON.stringify(subs));
+
+  res.status(200).json({ ok: true, operator, devices: Object.keys(subs).length });
 }
