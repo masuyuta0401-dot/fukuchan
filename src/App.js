@@ -192,7 +192,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v4.2";
+const APP_VERSION = "v4.3";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -406,6 +406,20 @@ export default function BabyTracker() {
   const [memoFrom, setMemoFrom]   = useState(null);
   const [memoTo, setMemoTo]       = useState(null);
   const [memoSaving, setMemoSaving] = useState(false);
+
+  // 通知の許可状態
+  const [pushPerm, setPushPerm] = useState("default");
+  useEffect(()=>{
+    const read=()=>{
+      if(typeof window==="undefined") return;
+      if(!("Notification" in window)) { setPushPerm("unsupported"); return; }
+      setPushPerm(Notification.permission);
+    };
+    read();
+    const onVis=()=>{ if(document.visibilityState==="visible") read(); };
+    document.addEventListener("visibilitychange", onVis);
+    return()=>document.removeEventListener("visibilitychange", onVis);
+  },[]);
 
   // 操作ログ
   const [logs, setLogs] = useState([]);
@@ -1024,14 +1038,45 @@ export default function BabyTracker() {
                 })}
               </div>
               <div style={{borderTop:"1px solid #D9E8F2",paddingTop:10,display:"flex",flexDirection:"column",gap:8}}>
-                <p style={{margin:0,fontSize:wide?14:12,color:"#7A8A95"}}>この端末（{curOp.emoji} {curOp.label}）で通知を受け取るには、一度だけ許可が必要です。iPhoneはホーム画面に追加したアイコンから開いて押してください。</p>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontSize:wide?15:13,fontWeight:800,color:"#3A4A55"}}>この端末（{curOp.emoji} {curOp.label}）の通知</span>
+                  <span style={{fontSize:wide?13:11,fontWeight:900,color:"white",borderRadius:10,padding:"3px 10px",
+                    background: pushPerm==="granted" ? "#27AE60" : pushPerm==="denied" ? "#E74C3C" : "#B0BEC7"}}>
+                    {pushPerm==="granted"?"許可済み":pushPerm==="denied"?"ブロック中":pushPerm==="unsupported"?"非対応":"未設定"}
+                  </span>
+                </div>
+                {pushPerm==="denied"&&(
+                  <div style={{background:"#FFF0F0",border:"2px solid #F3C0C0",borderRadius:12,padding:wide?14:10,fontSize:wide?14:12,lineHeight:1.8,color:"#8A4040"}}>
+                    <b>端末側でブロックされています。</b>アプリからは出し直せないので、下の手順で解除してください。<br/><br/>
+                    <b>iPhone</b><br/>
+                    設定アプリ →（一番下の方の）<b>千隼くん</b> → 通知 → 「通知を許可」をオン<br/>
+                    見つからない場合：ホーム画面のアイコンを削除 → Safariで開き直して「ホーム画面に追加」→ もう一度このボタンを押す<br/><br/>
+                    <b>Android</b><br/>
+                    設定 → アプリ → Chrome（またはこのアプリ）→ 通知 → オン
+                  </div>
+                )}
+                <p style={{margin:0,fontSize:wide?14:12,color:"#7A8A95"}}>通知の受け取りには一度だけ許可が必要です。iPhoneはホーム画面に追加したアイコンから開いて押してください。何度押しても大丈夫です。</p>
                 <div style={{display:"flex",gap:8}}>
                   <button
-                    onClick={()=>subscribePush(operator)
-                      .then(r=>alert(r?`${curOp.label}の端末として通知を登録しました（登録済み端末: ${r.info&&r.info.devices!=null?r.info.devices:"?"}台）`:"通知が許可されませんでした。iPhoneはホーム画面のアイコンから開いてください"))
-                      .catch(e=>alert("通知の登録に失敗しました\n"+(e&&e.message?e.message:e)))}
-                    style={{...st.submitBtn,flex:1,padding:wide?14:12,fontSize:wide?16:14}}>
-                    🔔 この端末で通知を許可する
+                    onClick={()=>{
+                      if(typeof Notification!=="undefined" && Notification.permission==="denied"){
+                        setPushPerm("denied");
+                        alert("端末の設定で通知がブロックされています。\n上の赤い枠の手順で解除してから、もう一度押してください。");
+                        return;
+                      }
+                      subscribePush(operator)
+                        .then(r=>{
+                          if(typeof Notification!=="undefined") setPushPerm(Notification.permission);
+                          alert(r?`${curOp.label}の端末として通知を登録しました（登録済み端末: ${r.info&&r.info.devices!=null?r.info.devices:"?"}台）`:"通知が許可されませんでした。iPhoneはホーム画面のアイコンから開いてください");
+                        })
+                        .catch(e=>{
+                          if(typeof Notification!=="undefined") setPushPerm(Notification.permission);
+                          alert("通知の登録に失敗しました\n"+(e&&e.message?e.message:e));
+                        });
+                    }}
+                    style={{...st.submitBtn,flex:1,padding:wide?14:12,fontSize:wide?16:14,
+                      background: pushPerm==="denied" ? "#B0BEC7" : pushPerm==="granted" ? "#27AE60" : "#3E8FC7"}}>
+                    {pushPerm==="granted"?"🔁 この端末を登録し直す":"🔔 この端末で通知を許可する"}
                   </button>
                   <button
                     onClick={()=>sendPush({ to:[operator], title:"🐥 テスト通知", body:"届いていればOKです" }).then(r=>{
