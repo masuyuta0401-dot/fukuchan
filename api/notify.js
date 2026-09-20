@@ -19,17 +19,44 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { title, body } = req.body;
+  const { title, body, to, dedupeKey, ttl } = req.body || {};
+  const targets = Array.isArray(to) && to.length ? to.filter(Boolean) : [];
+  if (!targets.length) return res.status(200).json({ ok: true, sent: 0, skipped: 'no targets' });
 
-  const sub = await redis.get('push_subscription');
-  if (!sub) return res.status(404).json({ ok: false, error: 'No subscription' });
+  if (dedupeKey) {
+    const got = await redis.set(`notified:${dedupeKey}`, '1', {
+      nx: true,
+      ex: Math.max(60, Number(ttl) || 3600),
+    });
+    if (!got) return res.status(200).json({ ok: true, sent: 0, skipped: 'duplicate' });
+  }
 
-  const subscription = typeof sub === 'string' ? JSON.parse(sub) : sub;
+  const payload = JSON.stringify({
+    title: title || '千隼くん',
+    body: body || '記録の時間です',
+  });
+  let sent = 0, failed = 0;
 
-  await webpush.sendNotification(
-    subscription,
-    JSON.stringify({ title: title || 'ふくちゃん', body: body || '記録の時間です' })
-  );
+  for (const op of targets) {
+    const key = `push_subs:${op}`;
+    const raw = await redis.get(key);
+    if (!raw) continue;
+    const subs = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    let changed = false;
+    for (const [endpoint, sub] of Object.entries(subs)) {
+      try {
+        await webpush.sendNotification(sub, payload);
+        sent++;
+      } catch (e) {
+        failed++;
+        if (e.statusCode === 404 || e.statusCode === 410) {
+          delete subs[endpoint];
+          changed = true;
+        }
+      }
+    }
+    if (changed) await redis.set(key, JSON.stringify(subs));
+  }
 
-  res.status(200).json({ ok: true });
+  res.status(200).json({ ok: true, sent, failed });
 }
