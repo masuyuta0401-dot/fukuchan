@@ -113,6 +113,10 @@ async function loadMemos() {
   return data || [];
 }
 
+async function deleteMemoDb(id) {
+  await sbFetch(`memos?id=eq.${encodeURIComponent(String(id))}`, { method: "DELETE" });
+}
+
 async function saveMemoDb(memo) {
   await sbFetch("memos", {
     method: "POST",
@@ -185,7 +189,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v4.7";
+const APP_VERSION = "v4.8";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -650,6 +654,14 @@ export default function BabyTracker() {
     addLog(op, "memo_update", "family", { content, from: memoFrom, to: memoTo });
   };
 
+  const delMemo = async(m) => {
+    if(!confirm("このメモを削除しますか？")) return;
+    setMemos(prev=>prev.filter(x=>x.id!==m.id));
+    await deleteMemoDb(m.id);
+    setMemos(await loadMemos());
+    addLog(opRef.current, "memo_delete", String(m.id), { content: m.content, from: m.from_op, to: m.to_op });
+  };
+
   const clearRecords = async() => {
     if(!confirm("記録をすべて削除？（全端末から消えます）")) return;
     setRecords([]);
@@ -822,6 +834,9 @@ export default function BabyTracker() {
                     {i===0&&<span style={{fontSize:wide?12:10,fontWeight:700,color:"white",background:"#E8A030",borderRadius:8,padding:"2px 8px"}}>最新</span>}
                     <OpTag label={m.from_op}/> <span style={{color:"#999"}}>→</span> <OpTag label={m.to_op}/>
                     <span style={{marginLeft:"auto",fontSize:wide?14:11,color:"#888",fontWeight:600}}>{fmtDateTime(m.updated_at)}</span>
+                    <button onClick={()=>delMemo(m)} title="このメモを削除"
+                      style={{border:"none",background:"transparent",color:"#C9B489",cursor:"pointer",
+                        fontSize:wide?22:18,lineHeight:1,padding:"2px 4px",fontWeight:700}}>×</button>
                   </div>
                   <div style={{fontSize:wide?(i===0?20:16):(i===0?15:13),lineHeight:1.7,whiteSpace:"pre-wrap",color:"#2D2D2D"}}>{m.content}</div>
                 </div>
