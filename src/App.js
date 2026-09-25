@@ -185,7 +185,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v4.6";
+const APP_VERSION = "v4.7";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -319,6 +319,54 @@ const mapRecs = (recs) => recs.map(r=>({
   label: r.label, ml: r.ml, value: r.value, unit: r.unit, note: r.note, operator: r.operator || null,
 }));
 
+// ─── 分数のスクロール選択（ドラムロール式） ───────────────────────
+function MinutePicker({ value, onChange, color, wide }) {
+  const ITEM = wide ? 62 : 54;
+  const VISIBLE = 5;
+  const PAD = ITEM * Math.floor(VISIBLE/2);
+  const opts = Array.from({length:61},(_,i)=>i);
+  const ref = useRef(null);
+  const lock = useRef(false);
+  useEffect(()=>{
+    if(ref.current) ref.current.scrollTop = value * ITEM;
+    // eslint-disable-next-line
+  },[]);
+  const onScroll = (e)=>{
+    if(lock.current) return;
+    const i = Math.max(0, Math.min(60, Math.round(e.target.scrollTop / ITEM)));
+    if(i !== value) onChange(i);
+  };
+  const jump = (o)=>{
+    lock.current = true;
+    onChange(o);
+    if(ref.current) ref.current.scrollTo({ top:o*ITEM, behavior:"smooth" });
+    setTimeout(()=>{ lock.current = false; }, 400);
+  };
+  return (
+    <div style={{position:"relative",height:ITEM*VISIBLE}}>
+      <div style={{position:"absolute",top:PAD,left:0,right:0,height:ITEM,background:color+"22",
+        border:`2.5px solid ${color}`,borderRadius:16,pointerEvents:"none",zIndex:1}}/>
+      <div ref={ref} className="fk-picker" onScroll={onScroll}
+        style={{height:"100%",overflowY:"auto",scrollSnapType:"y mandatory",WebkitOverflowScrolling:"touch",position:"relative",zIndex:2}}>
+        <div style={{height:PAD}}/>
+        {opts.map(o=>{
+          const on = o===value;
+          return (
+            <div key={o} onClick={()=>jump(o)}
+              style={{height:ITEM,display:"flex",alignItems:"center",justifyContent:"center",gap:4,
+                scrollSnapAlign:"center",cursor:"pointer",
+                fontSize:on?(wide?38:32):(wide?24:20),fontWeight:on?900:700,
+                color:on?color:"#C3D2DC",transition:"font-size .12s, color .12s"}}>
+              {o}<span style={{fontSize:on?(wide?18:15):(wide?14:12),fontWeight:700}}>分</span>
+            </div>
+          );
+        })}
+        <div style={{height:PAD}}/>
+      </div>
+    </div>
+  );
+}
+
 function useGlobalStyle() {
   useEffect(()=>{
     if(document.getElementById("fk-font")) return;
@@ -333,6 +381,8 @@ function useGlobalStyle() {
       *::-webkit-scrollbar{width:8px;height:8px}
       *::-webkit-scrollbar-thumb{background:#CFE3F0;border-radius:8px}
       input,textarea,select{font-family:inherit;}
+      .fk-picker{scrollbar-width:none;-ms-overflow-style:none;}
+      .fk-picker::-webkit-scrollbar{display:none;}
     `;
     document.head.appendChild(c);
   },[]);
@@ -357,6 +407,9 @@ export default function BabyTracker() {
   const [retryTick, setRetryTick] = useState(0);
   const [view, setView]       = useState("home");
   const [mlModal, setMlModal] = useState(null);
+  const [bfModal, setBfModal] = useState(null);   // null | "side" | "min"
+  const [bfSide, setBfSide]   = useState(null);   // "右" | "左"
+  const [bfMin, setBfMin]     = useState(10);
   const [valModal, setValModal]= useState(null);
   const [valInput, setValInput]= useState("");
   const [manualOpen, setManualOpen] = useState(false);
@@ -512,12 +565,17 @@ export default function BabyTracker() {
 
   const handleTap = (item) => {
     if(item.key==="other") { setOtherModal(true); setOtherText(""); return; }
+    if(item.key==="breastfeed") { setBfSide(null); setBfMin(10); setBfModal("side"); return; }
     if(item.hasMl) { setMlModal(item); return; }
     if(item.hasValue) { setValModal(item); setValInput(""); return; }
     addRecord(item.key);
   };
 
   const confirmMl = (ml) => { addRecord(mlModal.key,{ml}); setMlModal(null); };
+  const confirmBf = () => {
+    addRecord("breastfeed", { value: String(bfMin), unit: "分", note: `${bfSide}` });
+    setBfModal(null); setBfSide(null); setBfMin(10);
+  };
   const confirmVal = () => {
     if(!valInput) { setValModal(null); return; }
     addRecord(valModal.key,{value:valInput,unit:valModal.unit});
@@ -612,6 +670,7 @@ export default function BabyTracker() {
   const todayCount = (key)=>records.filter(r=>r.key===key&&new Date(r.timestamp).toDateString()===todayStr()).length;
   const lastOf     = (key)=>records.find(r=>r.key===key);
   const todayMl = records.filter(r=>r.key==="milk"&&new Date(r.timestamp).toDateString()===todayStr()).reduce((a,r)=>a+(r.ml||0),0);
+  const todayBfMin = records.filter(r=>r.key==="breastfeed"&&new Date(r.timestamp).toDateString()===todayStr()).reduce((a,r)=>a+(parseFloat(r.value)||0),0);
   const todaySleepMs=sleep.filter(s=>s.end&&new Date(s.start).toDateString()===todayStr()).reduce((a,s)=>a+(s.end-s.start),0);
 
   const allItems=[
@@ -775,7 +834,7 @@ export default function BabyTracker() {
               <div style={{display:"grid",gridTemplateColumns:wide?"repeat(2,1fr)":"repeat(3,1fr)",gap:wide?10:6,flex:1}}>
                 {[
                   {label:"ミルク",value:`${todayMl}ml`,sub:`${todayCount("milk")}回`,color:"#F4A261",emoji:"🍼"},
-                  {label:"母乳",value:`${todayCount("breastfeed")}回`,sub:lastOf("breastfeed")?timeSince(lastOf("breastfeed").timestamp):"–",color:"#F08080",emoji:"🤱"},
+                  {label:"母乳",value:`${todayCount("breastfeed")}回`,sub:todayBfMin>0?`計${todayBfMin}分`:(lastOf("breastfeed")?timeSince(lastOf("breastfeed").timestamp):"–"),color:"#F08080",emoji:"🤱"},
                   {label:"睡眠",value:todaySleepMs>0?fmtDur(todaySleepMs):"0分",sub:`${sleep.filter(s=>s.end&&new Date(s.start).toDateString()===todayStr()).length}回`,color:SLEEP_C,emoji:"😴"},
                   {label:"おしっこ",value:`${todayCount("pee")+todayCount("pee_poo")}回`,sub:lastOf("pee")||lastOf("pee_poo")?timeSince(Math.max(lastOf("pee")?.timestamp||0,lastOf("pee_poo")?.timestamp||0)):"–",color:"#4ECDC4",emoji:"💧"},
                   {label:"うんち",value:`${todayCount("poo")+todayCount("pee_poo")}回`,sub:lastOf("poo")||lastOf("pee_poo")?timeSince(Math.max(lastOf("poo")?.timestamp||0,lastOf("pee_poo")?.timestamp||0)):"–",color:"#C8A870",emoji:"💩"},
@@ -1082,6 +1141,40 @@ export default function BabyTracker() {
               ))}
             </div>
             {operator&&<p style={{margin:0,fontSize:11,color:"#AAA",textAlign:"center"}}>外側をクリックで閉じる</p>}
+          </div>
+        </div>
+      )}
+      {bfModal&&(
+        <div style={ovl} onClick={()=>setBfModal(null)}>
+          <div style={{...mdl,gap:14}} onClick={e=>e.stopPropagation()}>
+            {bfModal==="side"&&(
+              <>
+                <div style={mTitle}>🤱 母乳 — どちら側？</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                  {[{k:"左",emoji:"🫱"},{k:"右",emoji:"🫲"}].map(o=>(
+                    <button key={o.k} onClick={()=>{ setBfSide(o.k); setBfModal("min"); }}
+                      style={{border:"3px solid #F08080",background:"white",color:"#F08080",borderRadius:20,
+                        padding:wide?"26px 8px":"22px 8px",cursor:"pointer",display:"flex",flexDirection:"column",
+                        alignItems:"center",gap:8,fontFamily:"inherit"}}>
+                      <span style={{fontSize:wide?44:38}}>{o.emoji}</span>
+                      <span style={{fontSize:wide?22:19,fontWeight:900}}>{o.k}</span>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={()=>setBfModal(null)} style={st.cancelBtn}>キャンセル</button>
+              </>
+            )}
+            {bfModal==="min"&&(
+              <>
+                <div style={mTitle}>🤱 母乳（{bfSide}）— 何分？</div>
+                <p style={{margin:"-8px 0 0",fontSize:wide?14:12,color:"#9BACB8",textAlign:"center"}}>上下にスクロールして選ぶ</p>
+                <MinutePicker value={bfMin} onChange={setBfMin} color="#F08080" wide={wide}/>
+                <button onClick={confirmBf} style={{...st.submitBtn,background:"#F08080",fontSize:wide?20:16,padding:wide?16:14}}>
+                  {bfSide} {bfMin}分で記録する
+                </button>
+                <button onClick={()=>setBfModal("side")} style={{...st.cancelBtn,marginTop:0}}>← 左右を選び直す</button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1461,7 +1554,7 @@ function SummaryView({ records, sleep, todayCount, todaySleepMs, fmtDur, SLEEP_C
         const ALL_CARDS = {
           milk:       { title:"🍼 ミルク",   color:"#F4A261", segs:()=>pointSegs(["milk"]),          sub:()=>`${mlSum("milk")}ml・${cnt(["milk"])}回` },
           pumped:     { title:"🥛 搾母乳",   color:"#FFB347", segs:()=>pointSegs(["pumped"]),        sub:()=>`${mlSum("pumped")}ml・${cnt(["pumped"])}回` },
-          breastfeed: { title:"🤱 母乳",     color:"#F08080", segs:()=>pointSegs(["breastfeed"]),    sub:()=>`${cnt(["breastfeed"])}回` },
+          breastfeed: { title:"🤱 母乳",     color:"#F08080", segs:()=>pointSegs(["breastfeed"]),    sub:()=>{ const m=records.filter(r=>r.key==="breastfeed"&&inDay(r.timestamp)).reduce((x,r)=>x+(parseFloat(r.value)||0),0); return m>0?`${cnt(["breastfeed"])}回・${m}分`:`${cnt(["breastfeed"])}回`; } },
           pee:        { title:"💧 おしっこ", color:"#4ECDC4", segs:()=>pointSegs(["pee","pee_poo"]), sub:()=>`${cnt(["pee","pee_poo"])}回` },
           poo:        { title:"💩 うんち",   color:"#C8A870", segs:()=>pointSegs(["poo","pee_poo"]), sub:()=>`${cnt(["poo","pee_poo"])}回` },
           sleep:      { title:"😴 睡眠",     color:SLEEP_C,   segs:()=>sleepSegs,                    sub:()=>daySleepMs>0?fmtDur(daySleepMs):"0分" },
