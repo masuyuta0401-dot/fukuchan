@@ -189,13 +189,14 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v4.8";
+const APP_VERSION = "v4.9";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
 const SLEEP_SK = "bt_sleep";
 const REM_SK = "bt_reminders";
 const OP_SK = "bt_operator";
+const BF_SK = "bt_bf_timer";
 
 // ─── 操作者 ──────────────────────────────────────────────────────
 const OPERATORS = [
@@ -282,6 +283,11 @@ const timeSince = (d) => {
   return `${Math.floor(h/24)}日前`;
 };
 const todayStr = () => new Date().toDateString();
+const fmtClock = (ms) => {
+  const t = Math.max(0, Math.floor(ms/1000));
+  const m = Math.floor(t/60), sec = t%60;
+  return `${m}:${String(sec).padStart(2,"0")}`;
+};
 
 function groupByDate(items) {
   const g={};
@@ -411,7 +417,15 @@ export default function BabyTracker() {
   const [retryTick, setRetryTick] = useState(0);
   const [view, setView]       = useState("home");
   const [mlModal, setMlModal] = useState(null);
-  const [bfModal, setBfModal] = useState(null);   // null | "side" | "min"
+  const [bfModal, setBfModal] = useState(null);   // null | "side" | "timer" | "min"
+  const [bfTimer, setBfTimerState] = useState(()=>{ try{ return JSON.parse(localStorage.getItem(BF_SK)||"null"); }catch{ return null; } });
+  const setBfTimer = (v)=>{ setBfTimerState(v); try{ v?localStorage.setItem(BF_SK,JSON.stringify(v)):localStorage.removeItem(BF_SK); }catch{} };
+  const [, bfTick] = useState(0);
+  useEffect(()=>{
+    if(!bfTimer) return;
+    const id = setInterval(()=>bfTick(t=>t+1), 1000);
+    return ()=>clearInterval(id);
+  },[bfTimer]);
   const [bfSide, setBfSide]   = useState(null);   // "右" | "左"
   const [bfMin, setBfMin]     = useState(10);
   const [valModal, setValModal]= useState(null);
@@ -569,13 +583,27 @@ export default function BabyTracker() {
 
   const handleTap = (item) => {
     if(item.key==="other") { setOtherModal(true); setOtherText(""); return; }
-    if(item.key==="breastfeed") { setBfSide(null); setBfMin(10); setBfModal("side"); return; }
+    if(item.key==="breastfeed") {
+      if(bfTimer){ setBfSide(bfTimer.side); setBfModal("timer"); return; }
+      setBfSide(null); setBfMin(10); setBfModal("side"); return;
+    }
     if(item.hasMl) { setMlModal(item); return; }
     if(item.hasValue) { setValModal(item); setValInput(""); return; }
     addRecord(item.key);
   };
 
   const confirmMl = (ml) => { addRecord(mlModal.key,{ml}); setMlModal(null); };
+  const startBfTimer = (side) => { setBfTimer({ side, start: Date.now() }); };
+  const stopBfTimer = () => {
+    if(!bfTimer) return;
+    const ms = Date.now() - bfTimer.start;
+    const mins = Math.max(1, Math.round(ms/60000));
+    addRecord("breastfeed", { value: String(mins), unit: "分", note: `${bfTimer.side}` }, bfTimer.start);
+    setBfTimer(null);
+    setBfModal(null); setBfSide(null);
+  };
+  const cancelBfTimer = () => { setBfTimer(null); setBfModal(null); setBfSide(null); };
+
   const confirmBf = () => {
     addRecord("breastfeed", { value: String(bfMin), unit: "分", note: `${bfSide}` });
     setBfModal(null); setBfSide(null); setBfMin(10);
@@ -774,6 +802,23 @@ export default function BabyTracker() {
           )}
         </div>
       </header>
+      {bfTimer&&(
+        <div style={{position:"sticky",top:wide?86:96,zIndex:19,margin:wide?"12px 20px 0":"10px 14px 0",
+          background:"#FFEBF0",border:"2.5px solid #F08080",borderRadius:16,padding:wide?"12px 18px":"10px 12px",
+          display:"flex",alignItems:"center",gap:10,boxShadow:"0 4px 14px rgba(240,128,128,.2)"}}>
+          <span style={{fontSize:wide?26:22}}>🤱</span>
+          <div style={{display:"flex",flexDirection:"column",lineHeight:1.25}}>
+            <span style={{fontSize:wide?13:11,fontWeight:800,color:"#C05A70"}}>母乳（{bfTimer.side}）計測中</span>
+            <span style={{fontSize:wide?24:19,fontWeight:900,color:"#E2688F",fontVariantNumeric:"tabular-nums"}}>{fmtClock(Date.now()-bfTimer.start)}</span>
+          </div>
+          <button onClick={stopBfTimer}
+            style={{marginLeft:"auto",border:"none",background:"#E2688F",color:"white",borderRadius:12,
+              padding:wide?"12px 22px":"10px 16px",fontSize:wide?16:14,fontWeight:900,cursor:"pointer",
+              boxShadow:"0 3px 0 rgba(0,0,0,.12)",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+            ■ 終了
+          </button>
+        </div>
+      )}
       <main style={{...st.main,maxWidth:wide?"none":520,padding:wide?"20px 20px":14,width:"100%",boxSizing:"border-box"}}>
         {view==="home"&&(
           <div style={wide?st.homeWide:st.section}>
@@ -900,7 +945,11 @@ export default function BabyTracker() {
                         <span style={{fontSize:wide?46:24,lineHeight:1}}>{item.emoji}</span>
                         <span style={{fontSize:wide?22:12,fontWeight:900,marginTop:wide?8:3}}>{item.label}</span>
                         {(item.key==="milk"||item.key==="pumped")&&<span style={{fontSize:wide?16:9,opacity:.7,fontWeight:600}}>ml選択</span>}
-                        {item.key!=="milk"&&item.key!=="pumped"&&<span style={{fontSize:wide?16:9,opacity:.6,fontWeight:600}}>{lastOf(item.key)?timeSince(lastOf(item.key).timestamp):"未記録"}</span>}
+                        {item.key!=="milk"&&item.key!=="pumped"&&(
+                          item.key==="breastfeed"&&bfTimer
+                            ? <span style={{fontSize:wide?16:10,fontWeight:900,color:done?"white":"#E2688F"}}>⏱ {fmtClock(Date.now()-bfTimer.start)}</span>
+                            : <span style={{fontSize:wide?16:9,opacity:.6,fontWeight:600}}>{lastOf(item.key)?timeSince(lastOf(item.key).timestamp):"未記録"}</span>
+                        )}
                       </button>
                     );
                   })}
@@ -1167,7 +1216,7 @@ export default function BabyTracker() {
                 <div style={mTitle}>🤱 母乳 — どちら側？</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
                   {[{k:"左",emoji:"🫱"},{k:"右",emoji:"🫲"}].map(o=>(
-                    <button key={o.k} onClick={()=>{ setBfSide(o.k); setBfModal("min"); }}
+                    <button key={o.k} onClick={()=>{ setBfSide(o.k); setBfModal("timer"); }}
                       style={{border:"3px solid #F08080",background:"white",color:"#F08080",borderRadius:20,
                         padding:wide?"26px 8px":"22px 8px",cursor:"pointer",display:"flex",flexDirection:"column",
                         alignItems:"center",gap:8,fontFamily:"inherit"}}>
@@ -1179,6 +1228,38 @@ export default function BabyTracker() {
                 <button onClick={()=>setBfModal(null)} style={st.cancelBtn}>キャンセル</button>
               </>
             )}
+            {bfModal==="timer"&&(
+              <>
+                <div style={mTitle}>🤱 母乳（{bfSide}）</div>
+                {!bfTimer ? (
+                  <>
+                    <p style={{margin:"-8px 0 0",fontSize:wide?15:13,color:"#9BACB8",textAlign:"center"}}>ボタンを押すと計測がはじまります</p>
+                    <button onClick={()=>startBfTimer(bfSide)}
+                      style={{...st.submitBtn,background:"#F08080",fontSize:wide?24:20,padding:wide?"26px":"22px"}}>
+                      ▶ 計測スタート
+                    </button>
+                    <button onClick={()=>setBfModal("min")} style={{...st.cancelBtn,marginTop:0}}>時間を手入力する</button>
+                    <button onClick={()=>setBfModal("side")} style={{...st.cancelBtn,marginTop:0}}>← 左右を選び直す</button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{textAlign:"center",padding:wide?"18px 0":"12px 0"}}>
+                      <div style={{fontSize:wide?16:14,color:"#9BACB8",fontWeight:800}}>計測中</div>
+                      <div style={{fontSize:wide?72:56,fontWeight:900,color:"#F08080",lineHeight:1.15,fontVariantNumeric:"tabular-nums"}}>
+                        {fmtClock(Date.now()-bfTimer.start)}
+                      </div>
+                      <div style={{fontSize:wide?15:13,color:"#9BACB8",fontWeight:700}}>{fmt(bfTimer.start)} 開始</div>
+                    </div>
+                    <button onClick={stopBfTimer}
+                      style={{...st.submitBtn,background:"#E2688F",fontSize:wide?24:20,padding:wide?"26px":"22px"}}>
+                      ■ 終了して記録する
+                    </button>
+                    <p style={{margin:0,fontSize:wide?14:12,color:"#9BACB8",textAlign:"center"}}>画面を閉じても計測は続きます</p>
+                    <button onClick={()=>{ if(confirm("計測をやめて記録しませんか？")) cancelBfTimer(); }} style={{...st.cancelBtn,marginTop:0}}>計測をやめる（記録しない）</button>
+                  </>
+                )}
+              </>
+            )}
             {bfModal==="min"&&(
               <>
                 <div style={mTitle}>🤱 母乳（{bfSide}）— 何分？</div>
@@ -1187,7 +1268,7 @@ export default function BabyTracker() {
                 <button onClick={confirmBf} style={{...st.submitBtn,background:"#F08080",fontSize:wide?20:16,padding:wide?16:14}}>
                   {bfSide} {bfMin}分で記録する
                 </button>
-                <button onClick={()=>setBfModal("side")} style={{...st.cancelBtn,marginTop:0}}>← 左右を選び直す</button>
+                <button onClick={()=>setBfModal("timer")} style={{...st.cancelBtn,marginTop:0}}>← もどる</button>
               </>
             )}
           </div>
