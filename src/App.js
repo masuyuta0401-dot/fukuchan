@@ -208,7 +208,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v5.2";
+const APP_VERSION = "v5.3";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -1521,10 +1521,10 @@ export default function BabyTracker() {
             {valModal.hasDate&&(()=>{
               const p=(n)=>String(n).padStart(2,"0");
               const ymd=(d)=>`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
-              const chips=[0,1,2,3].map(i=>{
-                const d=new Date(); d.setDate(d.getDate()-i);
+              const chips=[-1,0,1,2].map(i=>{
+                const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+i);
                 const w=["日","月","火","水","木","金","土"][d.getDay()];
-                return { v:ymd(d), label:i===0?"今日":i===1?"昨日":`${d.getMonth()+1}/${d.getDate()}(${w})` };
+                return { v:ymd(d), label:i===0?"今日":i===-1?"昨日":`${d.getMonth()+1}/${d.getDate()}(${w})` };
               });
               return (
                 <>
