@@ -108,6 +108,25 @@ async function addLog(operator, action, targetId, detail) {
 }
 
 // ─── 引き継ぎメモ ─────────────────────────────────────────────────
+async function loadPlans() {
+  const data = await sbFetch("plans?user_id=eq.family&order=start_at.asc&limit=200", { headers: { "Prefer": "" } });
+  return data || [];
+}
+async function upsertPlan(p) {
+  await sbFetch("plans", {
+    method: "POST",
+    headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      id: String(p.id), user_id: "family", title: p.title || null,
+      start_at: p.start_at || null, place: p.place || null,
+      items: p.items || null, note: p.note || null, operator: p.operator || null,
+    }),
+  });
+}
+async function deletePlanDb(id) {
+  await sbFetch(`plans?id=eq.${encodeURIComponent(String(id))}`, { method: "DELETE" });
+}
+
 async function loadMemos() {
   const data = await sbFetch("memos?content=neq.&order=updated_at.desc&limit=3", { headers: { "Prefer": "" } });
   return data || [];
@@ -189,7 +208,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v4.9";
+const APP_VERSION = "v5.2";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -233,10 +252,10 @@ const CATS = {
     label: "健康", color: "#FF8C8C", icon: "🩺", bg: "#FFF0F0",
     items: [
       { key: "temp",    label: "体温",   emoji: "🌡️", color: "#FF8C8C", hasValue: true, unit: "℃", placeholder: "36.5" },
-      { key: "height",  label: "身長",   emoji: "📏", color: "#98C8D8", hasValue: true, unit: "cm", placeholder: "50.0" },
-      { key: "weight",  label: "体重",   emoji: "⚖️", color: "#98D8B8", hasValue: true, unit: "kg", placeholder: "3.2" },
-      { key: "head",    label: "頭囲",   emoji: "🟤", color: "#C8A870", hasValue: true, unit: "cm", placeholder: "34.0" },
-      { key: "chest",   label: "胸囲",   emoji: "🟠", color: "#F4A261", hasValue: true, unit: "cm", placeholder: "33.0" },
+      { key: "height",  label: "身長",   emoji: "📏", color: "#98C8D8", hasValue: true, unit: "cm", placeholder: "50.0", step: "0.1", hasDate: true },
+      { key: "weight",  label: "体重",   emoji: "⚖️", color: "#98D8B8", hasValue: true, unit: "g",  placeholder: "3200", step: "1",   hasDate: true },
+      { key: "head",    label: "頭囲",   emoji: "🟤", color: "#C8A870", hasValue: true, unit: "cm", placeholder: "34.0", step: "0.1", hasDate: true },
+      { key: "chest",   label: "胸囲",   emoji: "🟠", color: "#F4A261", hasValue: true, unit: "cm", placeholder: "33.0", step: "0.1", hasDate: true },
       { key: "cough",   label: "せき",   emoji: "😮‍💨", color: "#C0A8D8" },
       { key: "vomit",   label: "吐く",   emoji: "🤢", color: "#B8D870" },
       { key: "rash",    label: "発疹",   emoji: "🔴", color: "#FF9898" },
@@ -417,6 +436,11 @@ export default function BabyTracker() {
   const [retryTick, setRetryTick] = useState(0);
   const [view, setView]       = useState("home");
   const [mlModal, setMlModal] = useState(null);
+  const [plans, setPlans] = useState([]);
+  const [planModal, setPlanModal] = useState(false);
+  const [planEdit, setPlanEdit] = useState(null);      // 編集中の予定（新規は null）
+  const [planOpenId, setPlanOpenId] = useState(null);  // 詳細を開いている予定
+  const [pf, setPf] = useState({ title:"", when:"", place:"", items:"", note:"" });
   const [bfModal, setBfModal] = useState(null);   // null | "side" | "timer" | "min"
   const [bfTimer, setBfTimerState] = useState(()=>{ try{ return JSON.parse(localStorage.getItem(BF_SK)||"null"); }catch{ return null; } });
   const setBfTimer = (v)=>{ setBfTimerState(v); try{ v?localStorage.setItem(BF_SK,JSON.stringify(v)):localStorage.removeItem(BF_SK); }catch{} };
@@ -430,6 +454,7 @@ export default function BabyTracker() {
   const [bfMin, setBfMin]     = useState(10);
   const [valModal, setValModal]= useState(null);
   const [valInput, setValInput]= useState("");
+  const [valDate, setValDate]  = useState("");
   const [manualOpen, setManualOpen] = useState(false);
   const [manualKey,  setManualKey]  = useState(null);
   const [manualTime, setManualTime] = useState("");
@@ -491,8 +516,9 @@ export default function BabyTracker() {
       setConnError(false);
       const ok = await checkConnection();
       if(!ok){ setConnError(true); setLoading(false); return; }
-      const [recs, slps, m, cfg] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings()]);
+      const [recs, slps, m, cfg, pls] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings(), loadPlans()]);
       if(cfg){ if(cfg.reminders && Object.keys(cfg.reminders).length) setRemLocal(cfg.reminders); if(Array.isArray(cfg.notify_targets)) setNotifyTargets(cfg.notify_targets); }
+      setPlans(pls);
       setRecords(mapRecs(recs));
       setSleep(slps);
       localStorage.removeItem(SK); localStorage.removeItem(SLEEP_SK);
@@ -504,7 +530,8 @@ export default function BabyTracker() {
   // 30秒ごとに最新データを取得（他デバイスの更新を反映）
   useEffect(()=>{
     const id = setInterval(async()=>{
-      const [recs, slps, m, cfg] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings()]);
+      const [recs, slps, m, cfg, pls] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings(), loadPlans()]);
+      setPlans(pls);
       if(recs.length >= 0) setRecords(mapRecs(recs));
       if(slps.length >= 0) setSleep(slps);
       if(!memoEditing) setMemos(m);
@@ -588,11 +615,58 @@ export default function BabyTracker() {
       setBfSide(null); setBfMin(10); setBfModal("side"); return;
     }
     if(item.hasMl) { setMlModal(item); return; }
-    if(item.hasValue) { setValModal(item); setValInput(""); return; }
+    if(item.hasValue) {
+      const d = new Date(); const p=(n)=>String(n).padStart(2,"0");
+      setValModal(item); setValInput("");
+      setValDate(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`);
+      return;
+    }
     addRecord(item.key);
   };
 
   const confirmMl = (ml) => { addRecord(mlModal.key,{ml}); setMlModal(null); };
+  const toLocalInput = (ms) => {
+    if(!ms) return "";
+    const d = new Date(ms);
+    const p = (n)=>String(n).padStart(2,"0");
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const openPlanNew = () => {
+    setPlanEdit(null);
+    setPf({ title:"", when:"", place:"", items:"", note:"" });
+    setPlanModal(true);
+  };
+  const openPlanEdit = (p) => {
+    setPlanEdit(p);
+    setPf({ title:p.title||"", when:toLocalInput(p.start_at), place:p.place||"", items:p.items||"", note:p.note||"" });
+    setPlanModal(true);
+  };
+  const savePlan = async () => {
+    const row = {
+      id: planEdit ? planEdit.id : `plan_${Date.now()}`,
+      title: pf.title.trim(),
+      start_at: pf.when ? new Date(pf.when).getTime() : null,
+      place: pf.place.trim(), items: pf.items.trim(), note: pf.note.trim(),
+      operator: planEdit ? (planEdit.operator || opRef.current) : opRef.current,
+    };
+    if(!row.title && !row.start_at && !row.place && !row.items && !row.note){ setPlanModal(false); return; }
+    setPlans(prev=>{
+      const others = prev.filter(x=>x.id!==row.id);
+      return [...others, row].sort((a,b)=>(a.start_at||Infinity)-(b.start_at||Infinity));
+    });
+    setPlanModal(false);
+    await upsertPlan(row);
+    setPlans(await loadPlans());
+    addLog(opRef.current, planEdit?"plan_update":"plan_add", row.id, { title: row.title, start_at: row.start_at });
+  };
+  const delPlan = async (p) => {
+    if(!confirm(`「${p.title||"予定"}」を削除しますか？`)) return;
+    setPlans(prev=>prev.filter(x=>x.id!==p.id));
+    await deletePlanDb(p.id);
+    setPlans(await loadPlans());
+    addLog(opRef.current, "plan_delete", p.id, { title: p.title });
+  };
+
   const startBfTimer = (side) => { setBfTimer({ side, start: Date.now() }); };
   const stopBfTimer = () => {
     if(!bfTimer) return;
@@ -610,8 +684,15 @@ export default function BabyTracker() {
   };
   const confirmVal = () => {
     if(!valInput) { setValModal(null); return; }
-    addRecord(valModal.key,{value:valInput,unit:valModal.unit});
-    setValModal(null); setValInput("");
+    let ts = Date.now();
+    if(valModal.hasDate && valDate){
+      const now = new Date();
+      const d = new Date(`${valDate}T00:00:00`);
+      d.setHours(now.getHours(), now.getMinutes(), 0, 0);
+      if(!isNaN(d.getTime())) ts = d.getTime();
+    }
+    addRecord(valModal.key,{value:valInput,unit:valModal.unit},ts);
+    setValModal(null); setValInput(""); setValDate("");
   };
 
   const startSleep = async(ts=Date.now()) => {
@@ -777,7 +858,7 @@ export default function BabyTracker() {
             {wide?(
               <div style={{display:"flex",alignItems:"center",gap:14}}>
                 <nav style={{...st.nav,padding:4}}>
-                  {[["home","🍼 記録"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
+                  {[["home","🍼 記録"],["plans","📅 予定"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
                     <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,fontSize:19,padding:"11px 20px",...(view===v?st.navActive:{})}}>{l}</button>
                   ))}
                 </nav>
@@ -795,7 +876,7 @@ export default function BabyTracker() {
           </div>
           {!wide&&(
             <nav style={{...st.nav,padding:3,width:"100%"}}>
-              {[["home","🍼 記録"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
+              {[["home","🍼 記録"],["plans","📅 予定"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
                 <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,flex:1,fontSize:13,padding:"8px 4px",textAlign:"center",...(view===v?st.navActive:{})}}>{l}</button>
               ))}
             </nav>
@@ -1090,6 +1171,119 @@ export default function BabyTracker() {
         {view==="summary"&&(
           <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} wide={wide} zoom={zoom} />
         )}
+        {view==="plans"&&(()=>{
+          const now = Date.now();
+          const withT = plans.filter(p=>p.start_at);
+          const noT   = plans.filter(p=>!p.start_at);
+          const upcoming = withT.filter(p=>p.start_at>=now-3600000).sort((a,b)=>a.start_at-b.start_at);
+          const past     = withT.filter(p=>p.start_at< now-3600000).sort((a,b)=>b.start_at-a.start_at);
+          const untilTxt = (ms)=>{
+            const d = ms - Date.now();
+            if(d < 0) return "終了";
+            const mins = Math.floor(d/60000);
+            if(mins < 60) return `あと${mins}分`;
+            const h = Math.floor(mins/60);
+            if(h < 24) return `あと${h}時間`;
+            return `あと${Math.floor(h/24)}日`;
+          };
+          const dayTxt = (ms)=>{
+            const d = new Date(ms);
+            const w = ["日","月","火","水","木","金","土"][d.getDay()];
+            return `${d.getMonth()+1}/${d.getDate()}(${w}) ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+          };
+          const mapUrl = (place)=>`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place)}`;
+
+          const Card = ({ p, dim }) => {
+            const open = planOpenId === p.id;
+            const hasDetail = p.place || p.items || p.note;
+            return (
+              <div style={{background:"white",borderRadius:18,padding:wide?18:14,
+                boxShadow:"0 4px 14px rgba(120,170,210,.14)",display:"flex",flexDirection:"column",gap:10,
+                opacity:dim?.62:1,breakInside:"avoid"}}>
+                <div onClick={()=>setPlanOpenId(open?null:p.id)} style={{display:"flex",alignItems:"flex-start",gap:10,cursor:hasDetail?"pointer":"default"}}>
+                  <div style={{flex:1,display:"flex",flexDirection:"column",gap:4,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:wide?15:13,fontWeight:900,color:"#3E8FC7"}}>
+                        {p.start_at?dayTxt(p.start_at):"日時未定"}
+                      </span>
+                      {p.start_at&&!dim&&(
+                        <span style={{fontSize:wide?12:10,fontWeight:900,color:"white",background:"#7EC8F0",borderRadius:10,padding:"2px 9px"}}>
+                          {untilTxt(p.start_at)}
+                        </span>
+                      )}
+                      <OpTag label={p.operator}/>
+                    </div>
+                    <span style={{fontSize:wide?20:17,fontWeight:900,color:"#3A4A55",wordBreak:"break-word"}}>
+                      {p.title||"（無題の予定）"}
+                    </span>
+                    {!open&&hasDetail&&(
+                      <span style={{fontSize:wide?13:11,color:"#9BACB8",fontWeight:700}}>
+                        タップして詳細を見る{p.place?`　📍 ${p.place}`:""}
+                      </span>
+                    )}
+                  </div>
+                  {hasDetail&&<span style={{fontSize:wide?18:15,color:"#B9CBD8",fontWeight:900}}>{open?"▲":"▼"}</span>}
+                </div>
+                {open&&(
+                  <div style={{borderTop:"1.5px solid #EAF2F8",paddingTop:10,display:"flex",flexDirection:"column",gap:10}}>
+                    {p.place&&(
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                        <span style={{fontSize:wide?13:11,fontWeight:900,color:"#9BACB8"}}>📍 場所</span>
+                        <a href={mapUrl(p.place)} target="_blank" rel="noreferrer"
+                          style={{fontSize:wide?17:14,fontWeight:800,color:"#3E8FC7",textDecoration:"underline",wordBreak:"break-word"}}>
+                          {p.place}
+                        </a>
+                        <a href={mapUrl(p.place)} target="_blank" rel="noreferrer"
+                          style={{alignSelf:"flex-start",background:"#EAF4FB",color:"#2B6FA3",borderRadius:12,
+                            padding:wide?"9px 16px":"8px 14px",fontSize:wide?14:12,fontWeight:900,textDecoration:"none"}}>
+                          🗺 Googleマップで開く
+                        </a>
+                      </div>
+                    )}
+                    {p.items&&(
+                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                        <span style={{fontSize:wide?13:11,fontWeight:900,color:"#9BACB8"}}>🎒 持ち物</span>
+                        <span style={{fontSize:wide?16:14,whiteSpace:"pre-wrap",lineHeight:1.7}}>{p.items}</span>
+                      </div>
+                    )}
+                    {p.note&&(
+                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                        <span style={{fontSize:wide?13:11,fontWeight:900,color:"#9BACB8"}}>📝 備考</span>
+                        <span style={{fontSize:wide?16:14,whiteSpace:"pre-wrap",lineHeight:1.7}}>{p.note}</span>
+                      </div>
+                    )}
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>openPlanEdit(p)} style={{...st.memoEditBtn,fontSize:wide?14:12,padding:wide?"9px 18px":"7px 14px"}}>編集</button>
+                      <button onClick={()=>delPlan(p)} style={{...st.memoEditBtn,fontSize:wide?14:12,padding:wide?"9px 18px":"7px 14px",color:"#E74C3C",borderColor:"#F3C0C0"}}>削除</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          };
+
+          return (
+            <div style={st.section}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <h2 style={st.secTitle}>📅 今後の予定</h2>
+                <button onClick={openPlanNew} style={{...st.submitBtn,padding:wide?"12px 24px":"10px 18px",fontSize:wide?17:14}}>＋ 予定を追加</button>
+              </div>
+              {plans.length===0&&<p style={st.empty}>まだ予定がありません。「＋ 予定を追加」から登録できます。</p>}
+              <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,alignItems:"start"}:{display:"flex",flexDirection:"column",gap:12}}>
+                {upcoming.map(p=><Card key={p.id} p={p}/>)}
+                {noT.map(p=><Card key={p.id} p={p}/>)}
+              </div>
+              {past.length>0&&(
+                <>
+                  <div style={{...st.dateLabel,marginTop:8}}>終わった予定</div>
+                  <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,alignItems:"start"}:{display:"flex",flexDirection:"column",gap:12}}>
+                    {past.slice(0,20).map(p=><Card key={p.id} p={p} dim/>)}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
         {view==="settings"&&(
           <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,alignItems:"start"}:st.section}>
           <div style={st.section}>
@@ -1208,6 +1402,31 @@ export default function BabyTracker() {
           </div>
         </div>
       )}
+      {planModal&&(
+        <div style={ovl} onClick={()=>setPlanModal(false)}>
+          <div style={{...mdl,gap:12}} onClick={e=>e.stopPropagation()}>
+            <div style={mTitle}>{planEdit?"📅 予定を編集":"📅 予定を追加"}</div>
+            <p style={{margin:"-8px 0 2px",fontSize:wide?14:12,color:"#9BACB8",textAlign:"center"}}>すべて任意です</p>
+            <label style={st.inputLabel}>予定内容</label>
+            <input value={pf.title} onChange={e=>setPf({...pf,title:e.target.value})}
+              placeholder="例：1か月健診" style={{...st.input,fontSize:wide?18:16}}/>
+            <label style={st.inputLabel}>日時</label>
+            <input type="datetime-local" value={pf.when} onChange={e=>setPf({...pf,when:e.target.value})}
+              style={{...st.input,fontSize:wide?17:15}}/>
+            <label style={st.inputLabel}>場所（住所を入れるとマップで開けます）</label>
+            <input value={pf.place} onChange={e=>setPf({...pf,place:e.target.value})}
+              placeholder="例：東京都北区王子本町1-15-22" style={{...st.input,fontSize:wide?17:15}}/>
+            <label style={st.inputLabel}>持ち物</label>
+            <textarea rows={3} value={pf.items} onChange={e=>setPf({...pf,items:e.target.value})}
+              placeholder="例：母子手帳、保険証、おむつ3枚" style={{...st.input,fontSize:wide?17:15,resize:"vertical",lineHeight:1.6}}/>
+            <label style={st.inputLabel}>備考</label>
+            <textarea rows={3} value={pf.note} onChange={e=>setPf({...pf,note:e.target.value})}
+              placeholder="例：受付は15分前から" style={{...st.input,fontSize:wide?17:15,resize:"vertical",lineHeight:1.6}}/>
+            <button onClick={savePlan} style={{...st.submitBtn,fontSize:wide?19:16,padding:wide?16:14}}>保存する</button>
+            <button onClick={()=>setPlanModal(false)} style={st.cancelBtn}>キャンセル</button>
+          </div>
+        </div>
+      )}
       {bfModal&&(
         <div style={ovl} onClick={()=>setBfModal(null)}>
           <div style={{...mdl,gap:14}} onClick={e=>e.stopPropagation()}>
@@ -1295,10 +1514,39 @@ export default function BabyTracker() {
         <div style={ovl} onClick={()=>setValModal(null)}>
           <div style={{...mdl,gap:14}} onClick={e=>e.stopPropagation()}>
             <div style={mTitle}>{valModal.emoji} {valModal.label} ({valModal.unit})</div>
-            <input type="number" step="0.1" placeholder={valModal.placeholder}
+            <input type="number" step={valModal.step||"0.1"} inputMode="decimal" placeholder={valModal.placeholder}
               value={valInput} onChange={e=>setValInput(e.target.value)}
               onKeyDown={e=>{ if(e.key==="Enter") confirmVal(); }}
               style={{...st.input,fontSize:wide?40:20,padding:wide?"18px":"10px 12px",textAlign:"center",fontWeight:700,borderColor:valModal.color}} autoFocus/>
+            {valModal.hasDate&&(()=>{
+              const p=(n)=>String(n).padStart(2,"0");
+              const ymd=(d)=>`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+              const chips=[0,1,2,3].map(i=>{
+                const d=new Date(); d.setDate(d.getDate()-i);
+                const w=["日","月","火","水","木","金","土"][d.getDay()];
+                return { v:ymd(d), label:i===0?"今日":i===1?"昨日":`${d.getMonth()+1}/${d.getDate()}(${w})` };
+              });
+              return (
+                <>
+                  <label style={{...st.inputLabel,textAlign:"center"}}>測定日</label>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                    {chips.map(c=>{
+                      const on=valDate===c.v;
+                      return (
+                        <button key={c.v} onClick={()=>setValDate(c.v)}
+                          style={{border:`2.5px solid ${valModal.color}`,borderRadius:14,cursor:"pointer",
+                            background:on?valModal.color:"white",color:on?"white":valModal.color,
+                            padding:wide?"12px 4px":"10px 4px",fontSize:wide?16:13,fontWeight:900,fontFamily:"inherit"}}>
+                          {c.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input type="date" value={valDate} onChange={e=>setValDate(e.target.value)}
+                    style={{...st.input,fontSize:wide?20:16,padding:wide?"14px":"10px 12px",textAlign:"center",fontWeight:700,borderColor:"#E0E9F0"}}/>
+                </>
+              );
+            })()}
             <button onClick={confirmVal} style={{...st.submitBtn,fontSize:wide?20:15,padding:wide?16:12,background:valModal.color}} disabled={!valInput}>記録する</button>
             <button onClick={()=>setValModal(null)} style={st.cancelBtn}>キャンセル</button>
           </div>
