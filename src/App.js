@@ -120,6 +120,7 @@ async function upsertPlan(p) {
       id: String(p.id), user_id: "family", title: p.title || null,
       start_at: p.start_at || null, place: p.place || null,
       items: p.items || null, note: p.note || null, operator: p.operator || null,
+      owner: p.owner || null,
     }),
   });
 }
@@ -208,7 +209,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v5.3";
+const APP_VERSION = "v5.4";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -218,6 +219,14 @@ const OP_SK = "bt_operator";
 const BF_SK = "bt_bf_timer";
 
 // ─── 操作者 ──────────────────────────────────────────────────────
+const PLAN_OWNERS = [
+  { label:"パパ",  emoji:"👨", color:"#4A90D9" },
+  { label:"ママ",  emoji:"👩", color:"#F08080" },
+  { label:"千隼",  emoji:"🐥", color:"#58C09A" },
+  { label:"家族",  emoji:"👨‍👩‍👦", color:"#7C6FCD" },
+];
+const ownerOf = (label) => PLAN_OWNERS.find(o=>o.label===label) || { label: label||"家族", emoji:"👨‍👩‍👦", color:"#7C6FCD" };
+
 const OPERATORS = [
   { label:"ママ",       emoji:"👩", color:"#F08080" },
   { label:"パパ",       emoji:"👨", color:"#3E8FC7" },
@@ -440,7 +449,9 @@ export default function BabyTracker() {
   const [planModal, setPlanModal] = useState(false);
   const [planEdit, setPlanEdit] = useState(null);      // 編集中の予定（新規は null）
   const [planOpenId, setPlanOpenId] = useState(null);  // 詳細を開いている予定
-  const [pf, setPf] = useState({ title:"", when:"", place:"", items:"", note:"" });
+  const [pf, setPf] = useState({ title:"", when:"", place:"", items:"", note:"", owner:"家族" });
+  const [calYM, setCalYM] = useState(()=>{ const d=new Date(); return { y:d.getFullYear(), m:d.getMonth() }; });
+  const [selDay, setSelDay] = useState(null);
   const [bfModal, setBfModal] = useState(null);   // null | "side" | "timer" | "min"
   const [bfTimer, setBfTimerState] = useState(()=>{ try{ return JSON.parse(localStorage.getItem(BF_SK)||"null"); }catch{ return null; } });
   const setBfTimer = (v)=>{ setBfTimerState(v); try{ v?localStorage.setItem(BF_SK,JSON.stringify(v)):localStorage.removeItem(BF_SK); }catch{} };
@@ -633,12 +644,12 @@ export default function BabyTracker() {
   };
   const openPlanNew = () => {
     setPlanEdit(null);
-    setPf({ title:"", when:"", place:"", items:"", note:"" });
+    setPf({ title:"", when:"", place:"", items:"", note:"", owner:"家族" });
     setPlanModal(true);
   };
   const openPlanEdit = (p) => {
     setPlanEdit(p);
-    setPf({ title:p.title||"", when:toLocalInput(p.start_at), place:p.place||"", items:p.items||"", note:p.note||"" });
+    setPf({ title:p.title||"", when:toLocalInput(p.start_at), place:p.place||"", items:p.items||"", note:p.note||"", owner:p.owner||"家族" });
     setPlanModal(true);
   };
   const savePlan = async () => {
@@ -647,6 +658,7 @@ export default function BabyTracker() {
       title: pf.title.trim(),
       start_at: pf.when ? new Date(pf.when).getTime() : null,
       place: pf.place.trim(), items: pf.items.trim(), note: pf.note.trim(),
+      owner: pf.owner || "家族",
       operator: planEdit ? (planEdit.operator || opRef.current) : opRef.current,
     };
     if(!row.title && !row.start_at && !row.place && !row.items && !row.note){ setPlanModal(false); return; }
@@ -1197,12 +1209,15 @@ export default function BabyTracker() {
             const open = planOpenId === p.id;
             const hasDetail = p.place || p.items || p.note;
             return (
-              <div style={{background:"white",borderRadius:18,padding:wide?18:14,
+              <div style={{background:"white",borderRadius:18,padding:wide?18:14,borderLeft:`7px solid ${ownerOf(p.owner).color}`,
                 boxShadow:"0 4px 14px rgba(120,170,210,.14)",display:"flex",flexDirection:"column",gap:10,
                 opacity:dim?.62:1,breakInside:"avoid"}}>
                 <div onClick={()=>setPlanOpenId(open?null:p.id)} style={{display:"flex",alignItems:"flex-start",gap:10,cursor:hasDetail?"pointer":"default"}}>
                   <div style={{flex:1,display:"flex",flexDirection:"column",gap:4,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:wide?12:11,fontWeight:900,color:"white",background:ownerOf(p.owner).color,borderRadius:10,padding:"2px 9px"}}>
+                        {ownerOf(p.owner).emoji} {ownerOf(p.owner).label}
+                      </span>
                       <span style={{fontSize:wide?15:13,fontWeight:900,color:"#3E8FC7"}}>
                         {p.start_at?dayTxt(p.start_at):"日時未定"}
                       </span>
@@ -1211,7 +1226,6 @@ export default function BabyTracker() {
                           {untilTxt(p.start_at)}
                         </span>
                       )}
-                      <OpTag label={p.operator}/>
                     </div>
                     <span style={{fontSize:wide?20:17,fontWeight:900,color:"#3A4A55",wordBreak:"break-word"}}>
                       {p.title||"（無題の予定）"}
@@ -1268,6 +1282,95 @@ export default function BabyTracker() {
                 <h2 style={st.secTitle}>📅 今後の予定</h2>
                 <button onClick={openPlanNew} style={{...st.submitBtn,padding:wide?"12px 24px":"10px 18px",fontSize:wide?17:14}}>＋ 予定を追加</button>
               </div>
+              {(()=>{
+                const first = new Date(calYM.y, calYM.m, 1);
+                const lead = first.getDay();
+                const daysInMonth = new Date(calYM.y, calYM.m+1, 0).getDate();
+                const cells = [];
+                for(let i=0;i<lead;i++) cells.push(null);
+                for(let d=1;d<=daysInMonth;d++) cells.push(d);
+                while(cells.length%7!==0) cells.push(null);
+                const todayD = new Date(); todayD.setHours(0,0,0,0);
+                const byDay = {};
+                plans.filter(p=>p.start_at).forEach(p=>{
+                  const d = new Date(p.start_at);
+                  if(d.getFullYear()===calYM.y && d.getMonth()===calYM.m){
+                    (byDay[d.getDate()] = byDay[d.getDate()]||[]).push(p);
+                  }
+                });
+                Object.values(byDay).forEach(arr=>arr.sort((a,b)=>a.start_at-b.start_at));
+                const shift = (n)=>{ setSelDay(null); setCalYM(({y,m})=>{ const d=new Date(y,m+n,1); return { y:d.getFullYear(), m:d.getMonth() }; }); };
+                const cellH = wide?96:64;
+                return (
+                  <div style={{background:"white",borderRadius:20,padding:wide?18:12,boxShadow:"0 4px 14px rgba(120,170,210,.14)",display:"flex",flexDirection:"column",gap:10}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <button onClick={()=>shift(-1)} style={{border:"none",background:"#EAF4FB",color:"#3E8FC7",borderRadius:12,padding:wide?"10px 18px":"8px 14px",fontSize:wide?16:14,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>◀ 前月</button>
+                      <span style={{fontSize:wide?22:18,fontWeight:900,color:"#3A4A55"}}>{calYM.y}年{calYM.m+1}月</span>
+                      <button onClick={()=>shift(1)} style={{border:"none",background:"#EAF4FB",color:"#3E8FC7",borderRadius:12,padding:wide?"10px 18px":"8px 14px",fontSize:wide?16:14,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>翌月 ▶</button>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:wide?6:3}}>
+                      {["日","月","火","水","木","金","土"].map((w,i)=>(
+                        <div key={w} style={{textAlign:"center",fontSize:wide?14:11,fontWeight:900,padding:"2px 0",
+                          color:i===0?"#E06060":i===6?"#4A90D9":"#9BACB8"}}>{w}</div>
+                      ))}
+                      {cells.map((d,i)=>{
+                        if(d===null) return <div key={`e${i}`} style={{height:cellH}}/>;
+                        const dd = new Date(calYM.y, calYM.m, d);
+                        const isToday = dd.getTime()===todayD.getTime();
+                        const list = byDay[d]||[];
+                        const isSel = selDay===d;
+                        return (
+                          <div key={d} onClick={()=>setSelDay(isSel?null:d)}
+                            style={{height:cellH,borderRadius:10,padding:wide?"5px 5px":"3px 3px",cursor:"pointer",
+                              background:isSel?"#DCEEFA":isToday?"#FFF4E0":"#FAFCFE",
+                              border:isSel?"2.5px solid #3E8FC7":isToday?"2px solid #F0C070":"1px solid #EAF2F8",
+                              display:"flex",flexDirection:"column",gap:2,overflow:"hidden"}}>
+                            <span style={{fontSize:wide?14:11,fontWeight:900,
+                              color:i%7===0?"#E06060":i%7===6?"#4A90D9":"#7A8A95"}}>{d}</span>
+                            {list.slice(0,wide?3:2).map(p=>(
+                              <div key={p.id} style={{background:ownerOf(p.owner).color,color:"white",borderRadius:5,
+                                padding:wide?"2px 5px":"1px 3px",fontSize:wide?11:8,fontWeight:800,
+                                whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.4}}>
+                                {p.title||"予定"}
+                              </div>
+                            ))}
+                            {list.length>(wide?3:2)&&(
+                              <span style={{fontSize:wide?11:8,fontWeight:800,color:"#9BACB8"}}>+{list.length-(wide?3:2)}</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"center",borderTop:"1px solid #EAF2F8",paddingTop:8}}>
+                      {PLAN_OWNERS.map(o=>(
+                        <span key={o.label} style={{display:"flex",alignItems:"center",gap:4,fontSize:wide?13:11,fontWeight:800,color:"#7A8A95"}}>
+                          <span style={{width:11,height:11,borderRadius:3,background:o.color,display:"inline-block"}}/>{o.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              {selDay&&(()=>{
+                const list = plans.filter(p=>{
+                  if(!p.start_at) return false;
+                  const d=new Date(p.start_at);
+                  return d.getFullYear()===calYM.y && d.getMonth()===calYM.m && d.getDate()===selDay;
+                }).sort((a,b)=>a.start_at-b.start_at);
+                const w=["日","月","火","水","木","金","土"][new Date(calYM.y,calYM.m,selDay).getDay()];
+                return (
+                  <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{...st.dateLabel}}>{calYM.m+1}/{selDay}({w}) の予定</span>
+                      <button onClick={()=>setSelDay(null)} style={{...st.memoEditBtn,fontSize:wide?13:11}}>閉じる</button>
+                    </div>
+                    {list.length===0&&<p style={{...st.empty,padding:16}}>この日の予定はありません</p>}
+                    <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,alignItems:"start"}:{display:"flex",flexDirection:"column",gap:12}}>
+                      {list.map(p=><Card key={p.id} p={p}/>)}
+                    </div>
+                  </div>
+                );
+              })()}
               {plans.length===0&&<p style={st.empty}>まだ予定がありません。「＋ 予定を追加」から登録できます。</p>}
               <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,alignItems:"start"}:{display:"flex",flexDirection:"column",gap:12}}>
                 {upcoming.map(p=><Card key={p.id} p={p}/>)}
@@ -1407,6 +1510,22 @@ export default function BabyTracker() {
           <div style={{...mdl,gap:12}} onClick={e=>e.stopPropagation()}>
             <div style={mTitle}>{planEdit?"📅 予定を編集":"📅 予定を追加"}</div>
             <p style={{margin:"-8px 0 2px",fontSize:wide?14:12,color:"#9BACB8",textAlign:"center"}}>すべて任意です</p>
+            <label style={st.inputLabel}>誰の予定？</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+              {PLAN_OWNERS.map(o=>{
+                const on = pf.owner===o.label;
+                return (
+                  <button key={o.label} onClick={()=>setPf({...pf,owner:o.label})}
+                    style={{border:`2.5px solid ${o.color}`,borderRadius:14,cursor:"pointer",
+                      background:on?o.color:"white",color:on?"white":o.color,
+                      padding:wide?"12px 4px":"10px 2px",fontFamily:"inherit",
+                      display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                    <span style={{fontSize:wide?24:20}}>{o.emoji}</span>
+                    <span style={{fontSize:wide?14:12,fontWeight:900}}>{o.label}</span>
+                  </button>
+                );
+              })}
+            </div>
             <label style={st.inputLabel}>予定内容</label>
             <input value={pf.title} onChange={e=>setPf({...pf,title:e.target.value})}
               placeholder="例：1か月健診" style={{...st.input,fontSize:wide?18:16}}/>
