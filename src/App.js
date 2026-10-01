@@ -108,6 +108,24 @@ async function addLog(operator, action, targetId, detail) {
 }
 
 // ─── 引き継ぎメモ ─────────────────────────────────────────────────
+async function loadMemories() {
+  const data = await sbFetch("memories?user_id=eq.family&order=happened_on.desc&limit=500", { headers: { "Prefer": "" } });
+  return data || [];
+}
+async function upsertMemory(m) {
+  await sbFetch("memories", {
+    method: "POST",
+    headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      id: String(m.id), user_id: "family", happened_on: m.happened_on || null,
+      title: m.title || null, body: m.body || null, operator: m.operator || null,
+    }),
+  });
+}
+async function deleteMemoryDb(id) {
+  await sbFetch(`memories?id=eq.${encodeURIComponent(String(id))}`, { method: "DELETE" });
+}
+
 async function loadPlans() {
   const data = await sbFetch("plans?user_id=eq.family&order=start_at.asc&limit=200", { headers: { "Prefer": "" } });
   return data || [];
@@ -209,7 +227,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v5.4";
+const APP_VERSION = "v5.5";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -451,6 +469,13 @@ export default function BabyTracker() {
   const [planOpenId, setPlanOpenId] = useState(null);  // 詳細を開いている予定
   const [pf, setPf] = useState({ title:"", when:"", place:"", items:"", note:"", owner:"家族" });
   const [calYM, setCalYM] = useState(()=>{ const d=new Date(); return { y:d.getFullYear(), m:d.getMonth() }; });
+  const [memories, setMemories] = useState([]);
+  const [memModal, setMemModal] = useState(false);
+  const [memEdit, setMemEdit] = useState(null);
+  const [memOpenId, setMemOpenId] = useState(null);
+  const [mf, setMf] = useState({ on:"", title:"", body:"" });
+  const [memYM, setMemYM] = useState(()=>{ const d=new Date(); return { y:d.getFullYear(), m:d.getMonth() }; });
+  const [memSelDay, setMemSelDay] = useState(null);
   const [selDay, setSelDay] = useState(null);
   const [bfModal, setBfModal] = useState(null);   // null | "side" | "timer" | "min"
   const [bfTimer, setBfTimerState] = useState(()=>{ try{ return JSON.parse(localStorage.getItem(BF_SK)||"null"); }catch{ return null; } });
@@ -527,7 +552,8 @@ export default function BabyTracker() {
       setConnError(false);
       const ok = await checkConnection();
       if(!ok){ setConnError(true); setLoading(false); return; }
-      const [recs, slps, m, cfg, pls] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings(), loadPlans()]);
+      const [recs, slps, m, cfg, pls, mem] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings(), loadPlans(), loadMemories()]);
+      setMemories(mem);
       if(cfg){ if(cfg.reminders && Object.keys(cfg.reminders).length) setRemLocal(cfg.reminders); if(Array.isArray(cfg.notify_targets)) setNotifyTargets(cfg.notify_targets); }
       setPlans(pls);
       setRecords(mapRecs(recs));
@@ -541,8 +567,8 @@ export default function BabyTracker() {
   // 30秒ごとに最新データを取得（他デバイスの更新を反映）
   useEffect(()=>{
     const id = setInterval(async()=>{
-      const [recs, slps, m, cfg, pls] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings(), loadPlans()]);
-      setPlans(pls);
+      const [recs, slps, m, cfg, pls, mem] = await Promise.all([loadRecords(), loadSleep(), loadMemos(), loadSettings(), loadPlans(), loadMemories()]);
+      setPlans(pls); setMemories(mem);
       if(recs.length >= 0) setRecords(mapRecs(recs));
       if(slps.length >= 0) setSleep(slps);
       if(!memoEditing) setMemos(m);
@@ -642,6 +668,39 @@ export default function BabyTracker() {
     const p = (n)=>String(n).padStart(2,"0");
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
   };
+  const ymdStr = (d)=>{ const p=(n)=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; };
+  const openMemNew = () => {
+    setMemEdit(null);
+    setMf({ on: ymdStr(new Date()), title:"", body:"" });
+    setMemModal(true);
+  };
+  const openMemEdit = (m) => {
+    setMemEdit(m);
+    setMf({ on: m.happened_on || "", title: m.title || "", body: m.body || "" });
+    setMemModal(true);
+  };
+  const saveMemory = async () => {
+    const row = {
+      id: memEdit ? memEdit.id : `mem_${Date.now()}`,
+      happened_on: mf.on || null,
+      title: mf.title.trim(),
+      body: mf.body.trim(),
+      operator: memEdit ? (memEdit.operator || opRef.current) : opRef.current,
+    };
+    if(!row.title && !row.body){ setMemModal(false); return; }
+    setMemModal(false);
+    await upsertMemory(row);
+    setMemories(await loadMemories());
+    addLog(opRef.current, memEdit?"memory_update":"memory_add", row.id, { title: row.title, on: row.happened_on });
+  };
+  const delMemory = async (m) => {
+    if(!confirm(`「${m.title||"思い出"}」を削除しますか？`)) return;
+    setMemories(prev=>prev.filter(x=>x.id!==m.id));
+    await deleteMemoryDb(m.id);
+    setMemories(await loadMemories());
+    addLog(opRef.current, "memory_delete", m.id, { title: m.title });
+  };
+
   const openPlanNew = () => {
     setPlanEdit(null);
     setPf({ title:"", when:"", place:"", items:"", note:"", owner:"家族" });
@@ -870,7 +929,7 @@ export default function BabyTracker() {
             {wide?(
               <div style={{display:"flex",alignItems:"center",gap:14}}>
                 <nav style={{...st.nav,padding:4}}>
-                  {[["home","🍼 記録"],["plans","📅 予定"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
+                  {[["home","🍼 記録"],["plans","📅 予定"],["firsts","⭐ 初めてログ"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
                     <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,fontSize:19,padding:"11px 20px",...(view===v?st.navActive:{})}}>{l}</button>
                   ))}
                 </nav>
@@ -888,7 +947,7 @@ export default function BabyTracker() {
           </div>
           {!wide&&(
             <nav style={{...st.nav,padding:3,width:"100%"}}>
-              {[["home","🍼 記録"],["plans","📅 予定"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
+              {[["home","🍼 記録"],["plans","📅 予定"],["firsts","⭐ 初めてログ"],["history","📖 履歴"],["summary","📈 グラフ"],["settings","⚙️ 設定"]].map(([v,l])=>(
                 <button key={v} onClick={()=>setView(v)} style={{...st.navBtn,flex:1,fontSize:13,padding:"8px 4px",textAlign:"center",...(view===v?st.navActive:{})}}>{l}</button>
               ))}
             </nav>
@@ -1183,6 +1242,135 @@ export default function BabyTracker() {
         {view==="summary"&&(
           <SummaryView records={records} sleep={sleep} todayCount={todayCount} todaySleepMs={todaySleepMs} fmtDur={fmtDur} SLEEP_C={SLEEP_C} wide={wide} zoom={zoom} />
         )}
+        {view==="firsts"&&(()=>{
+          const GOLD = "#E8A030";
+          const parseOn = (str)=>{ if(!str) return null; const [y,m,d]=str.split("-").map(Number); return new Date(y,(m||1)-1,d||1); };
+          const first = new Date(memYM.y, memYM.m, 1);
+          const lead = first.getDay();
+          const dim = new Date(memYM.y, memYM.m+1, 0).getDate();
+          const cells = [];
+          for(let i=0;i<lead;i++) cells.push(null);
+          for(let d=1;d<=dim;d++) cells.push(d);
+          while(cells.length%7!==0) cells.push(null);
+          const todayD = new Date(); todayD.setHours(0,0,0,0);
+          const byDay = {};
+          memories.forEach(m=>{
+            const d = parseOn(m.happened_on);
+            if(d && d.getFullYear()===memYM.y && d.getMonth()===memYM.m){
+              (byDay[d.getDate()] = byDay[d.getDate()]||[]).push(m);
+            }
+          });
+          const shift = (n)=>{ setMemSelDay(null); setMemYM(({y,m})=>{ const d=new Date(y,m+n,1); return { y:d.getFullYear(), m:d.getMonth() }; }); };
+          const cellH = wide?96:64;
+          const dateTxt = (str)=>{
+            const d = parseOn(str); if(!d) return "日付なし";
+            const w = ["日","月","火","水","木","金","土"][d.getDay()];
+            return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}(${w})`;
+          };
+          const MemCard = ({ m }) => {
+            const open = memOpenId === m.id;
+            return (
+              <div style={{background:"white",borderRadius:18,padding:wide?18:14,borderLeft:`7px solid ${GOLD}`,
+                boxShadow:"0 4px 14px rgba(200,160,60,.16)",display:"flex",flexDirection:"column",gap:8,breakInside:"avoid"}}>
+                <div onClick={()=>setMemOpenId(open?null:m.id)} style={{display:"flex",alignItems:"flex-start",gap:10,cursor:m.body?"pointer":"default"}}>
+                  <div style={{flex:1,display:"flex",flexDirection:"column",gap:4,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:wide?14:12,fontWeight:900,color:GOLD}}>⭐ {dateTxt(m.happened_on)}</span>
+                      <OpTag label={m.operator}/>
+                    </div>
+                    <span style={{fontSize:wide?20:17,fontWeight:900,color:"#3A4A55",wordBreak:"break-word"}}>{m.title||"（無題）"}</span>
+                    {!open&&m.body&&<span style={{fontSize:wide?13:11,color:"#9BACB8",fontWeight:700}}>タップして詳細を見る</span>}
+                  </div>
+                  {m.body&&<span style={{fontSize:wide?18:15,color:"#D8C48A",fontWeight:900}}>{open?"▲":"▼"}</span>}
+                </div>
+                {open&&(
+                  <div style={{borderTop:"1.5px solid #F3EAD3",paddingTop:10,display:"flex",flexDirection:"column",gap:10}}>
+                    {m.body&&<span style={{fontSize:wide?17:14,whiteSpace:"pre-wrap",lineHeight:1.8}}>{m.body}</span>}
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>openMemEdit(m)} style={{...st.memoEditBtn,fontSize:wide?14:12,padding:wide?"9px 18px":"7px 14px"}}>編集</button>
+                      <button onClick={()=>delMemory(m)} style={{...st.memoEditBtn,fontSize:wide?14:12,padding:wide?"9px 18px":"7px 14px",color:"#E74C3C",borderColor:"#F3C0C0"}}>削除</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          };
+          const monthList = memories.filter(m=>{
+            const d=parseOn(m.happened_on);
+            return d && d.getFullYear()===memYM.y && d.getMonth()===memYM.m;
+          }).sort((a,b)=>(a.happened_on<b.happened_on?1:-1));
+          const dayList = memSelDay ? monthList.filter(m=>parseOn(m.happened_on).getDate()===memSelDay) : null;
+
+          return (
+            <div style={st.section}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                <h2 style={{...st.secTitle,color:GOLD}}>⭐ 初めてログ</h2>
+                <button onClick={openMemNew} style={{...st.submitBtn,background:GOLD,padding:wide?"12px 24px":"10px 16px",fontSize:wide?17:14}}>＋ 記録する</button>
+              </div>
+              <div style={{background:"white",borderRadius:20,padding:wide?18:12,boxShadow:"0 4px 14px rgba(200,160,60,.16)",display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <button onClick={()=>shift(-1)} style={{border:"none",background:"#FFF4E0",color:GOLD,borderRadius:12,padding:wide?"10px 18px":"8px 14px",fontSize:wide?16:14,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>◀ 前月</button>
+                  <span style={{fontSize:wide?22:18,fontWeight:900,color:"#3A4A55"}}>{memYM.y}年{memYM.m+1}月</span>
+                  <button onClick={()=>shift(1)} style={{border:"none",background:"#FFF4E0",color:GOLD,borderRadius:12,padding:wide?"10px 18px":"8px 14px",fontSize:wide?16:14,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>翌月 ▶</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:wide?6:3}}>
+                  {["日","月","火","水","木","金","土"].map((w,i)=>(
+                    <div key={w} style={{textAlign:"center",fontSize:wide?14:11,fontWeight:900,padding:"2px 0",
+                      color:i===0?"#E06060":i===6?"#4A90D9":"#9BACB8"}}>{w}</div>
+                  ))}
+                  {cells.map((d,i)=>{
+                    if(d===null) return <div key={`e${i}`} style={{height:cellH}}/>;
+                    const dd = new Date(memYM.y, memYM.m, d);
+                    const isToday = dd.getTime()===todayD.getTime();
+                    const list = byDay[d]||[];
+                    const isSel = memSelDay===d;
+                    return (
+                      <div key={d} onClick={()=>setMemSelDay(isSel?null:d)}
+                        style={{height:cellH,borderRadius:10,padding:wide?"5px 5px":"3px 3px",cursor:"pointer",
+                          background:isSel?"#FFEFD0":isToday?"#FFF4E0":"#FFFDF8",
+                          border:isSel?`2.5px solid ${GOLD}`:isToday?"2px solid #F0C070":"1px solid #F3EAD3",
+                          display:"flex",flexDirection:"column",gap:2,overflow:"hidden"}}>
+                        <span style={{fontSize:wide?14:11,fontWeight:900,
+                          color:i%7===0?"#E06060":i%7===6?"#4A90D9":"#7A8A95"}}>{d}</span>
+                        {list.slice(0,wide?3:2).map(m=>(
+                          <div key={m.id} style={{background:GOLD,color:"white",borderRadius:5,
+                            padding:wide?"2px 5px":"1px 3px",fontSize:wide?11:8,fontWeight:800,
+                            whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.4}}>
+                            {m.title||"思い出"}
+                          </div>
+                        ))}
+                        {list.length>(wide?3:2)&&(
+                          <span style={{fontSize:wide?11:8,fontWeight:800,color:"#C9B489"}}>+{list.length-(wide?3:2)}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {memSelDay&&(
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{...st.dateLabel,background:"#FFF0D4",color:GOLD}}>{memYM.m+1}/{memSelDay} の記録</span>
+                    <button onClick={()=>setMemSelDay(null)} style={{...st.memoEditBtn,fontSize:wide?13:11}}>閉じる</button>
+                  </div>
+                  {dayList.length===0&&<p style={{...st.empty,padding:16}}>この日の記録はありません</p>}
+                  <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,alignItems:"start"}:{display:"flex",flexDirection:"column",gap:12}}>
+                    {dayList.map(m=><MemCard key={m.id} m={m}/>)}
+                  </div>
+                </div>
+              )}
+              {!memSelDay&&(
+                <>
+                  <div style={{...st.dateLabel,background:"#FFF0D4",color:GOLD}}>{memYM.y}年{memYM.m+1}月の記録（{monthList.length}件）</div>
+                  {monthList.length===0&&<p style={st.empty}>この月の記録はまだありません。「＋ 記録する」から残せます。</p>}
+                  <div style={wide?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,alignItems:"start"}:{display:"flex",flexDirection:"column",gap:12}}>
+                    {monthList.map(m=><MemCard key={m.id} m={m}/>)}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
         {view==="plans"&&(()=>{
           const now = Date.now();
           const withT = plans.filter(p=>p.start_at);
@@ -1502,6 +1690,48 @@ export default function BabyTracker() {
               ))}
             </div>
             {operator&&<p style={{margin:0,fontSize:11,color:"#AAA",textAlign:"center"}}>外側をクリックで閉じる</p>}
+          </div>
+        </div>
+      )}
+      {memModal&&(
+        <div style={ovl} onClick={()=>setMemModal(false)}>
+          <div style={{...mdl,gap:12}} onClick={e=>e.stopPropagation()}>
+            <div style={{...mTitle,color:"#E8A030"}}>{memEdit?"⭐ 記録を編集":"⭐ 初めてログに記録"}</div>
+            <label style={st.inputLabel}>日付</label>
+            {(()=>{
+              const p=(n)=>String(n).padStart(2,"0");
+              const ymd=(d)=>`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+              const chips=[0,-1,-2].map(i=>{
+                const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+i);
+                const w=["日","月","火","水","木","金","土"][d.getDay()];
+                return { v:ymd(d), label:i===0?"今日":i===-1?"昨日":`${d.getMonth()+1}/${d.getDate()}(${w})` };
+              });
+              return (
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                  {chips.map(c=>{
+                    const on=mf.on===c.v;
+                    return (
+                      <button key={c.v} onClick={()=>setMf({...mf,on:c.v})}
+                        style={{border:"2.5px solid #E8A030",borderRadius:14,cursor:"pointer",
+                          background:on?"#E8A030":"white",color:on?"white":"#E8A030",
+                          padding:wide?"12px 4px":"10px 4px",fontSize:wide?16:13,fontWeight:900,fontFamily:"inherit"}}>
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            <input type="date" value={mf.on} onChange={e=>setMf({...mf,on:e.target.value})}
+              style={{...st.input,fontSize:wide?20:16,padding:wide?"14px":"10px 12px",textAlign:"center",fontWeight:700}}/>
+            <label style={st.inputLabel}>できごと</label>
+            <input value={mf.title} onChange={e=>setMf({...mf,title:e.target.value})}
+              placeholder="例：はじめての沐浴 / 爪を切った" style={{...st.input,fontSize:wide?18:16}}/>
+            <label style={st.inputLabel}>メモ（任意）</label>
+            <textarea rows={5} value={mf.body} onChange={e=>setMf({...mf,body:e.target.value})}
+              placeholder="例：泣かずにごきげんだった。パパが初挑戦。" style={{...st.input,fontSize:wide?17:15,resize:"vertical",lineHeight:1.7}}/>
+            <button onClick={saveMemory} style={{...st.submitBtn,background:"#E8A030",fontSize:wide?19:16,padding:wide?16:14}}>保存する</button>
+            <button onClick={()=>setMemModal(false)} style={st.cancelBtn}>キャンセル</button>
           </div>
         </div>
       )}
