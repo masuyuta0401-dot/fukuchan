@@ -227,7 +227,7 @@ function gasPost(body) {
     .catch(e => console.log("GAS error:", e));
 }
 
-const APP_VERSION = "v5.5";
+const APP_VERSION = "v5.7";
 
 // ─── Storage keys ───────────────────────────────────────────────
 const SK = "bt_records";
@@ -488,6 +488,7 @@ export default function BabyTracker() {
   },[bfTimer]);
   const [bfSide, setBfSide]   = useState(null);   // "右" | "左"
   const [bfMin, setBfMin]     = useState(10);
+  const [bfStartInput, setBfStartInput] = useState("");
   const [valModal, setValModal]= useState(null);
   const [valInput, setValInput]= useState("");
   const [valDate, setValDate]  = useState("");
@@ -750,8 +751,13 @@ export default function BabyTracker() {
   const cancelBfTimer = () => { setBfTimer(null); setBfModal(null); setBfSide(null); };
 
   const confirmBf = () => {
-    addRecord("breastfeed", { value: String(bfMin), unit: "分", note: `${bfSide}` });
-    setBfModal(null); setBfSide(null); setBfMin(10);
+    let ts = Date.now();
+    if(bfStartInput){
+      const t = new Date(bfStartInput).getTime();
+      if(!isNaN(t)) ts = t;
+    }
+    addRecord("breastfeed", { value: String(bfMin), unit: "分", note: `${bfSide}` }, ts);
+    setBfModal(null); setBfSide(null); setBfMin(10); setBfStartInput("");
   };
   const confirmVal = () => {
     if(!valInput) { setValModal(null); return; }
@@ -1806,7 +1812,12 @@ export default function BabyTracker() {
                       style={{...st.submitBtn,background:"#F08080",fontSize:wide?24:20,padding:wide?"26px":"22px"}}>
                       ▶ 計測スタート
                     </button>
-                    <button onClick={()=>setBfModal("min")} style={{...st.cancelBtn,marginTop:0}}>時間を手入力する</button>
+                    <button onClick={()=>{
+                  const d = new Date(Date.now() - bfMin*60000);
+                  const p=(n)=>String(n).padStart(2,"0");
+                  setBfStartInput(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`);
+                  setBfModal("min");
+                }} style={{...st.cancelBtn,marginTop:0}}>時間を手入力する</button>
                     <button onClick={()=>setBfModal("side")} style={{...st.cancelBtn,marginTop:0}}>← 左右を選び直す</button>
                   </>
                 ) : (
@@ -1833,6 +1844,9 @@ export default function BabyTracker() {
                 <div style={mTitle}>🤱 母乳（{bfSide}）— 何分？</div>
                 <p style={{margin:"-8px 0 0",fontSize:wide?14:12,color:"#9BACB8",textAlign:"center"}}>上下にスクロールして選ぶ</p>
                 <MinutePicker value={bfMin} onChange={setBfMin} color="#F08080" wide={wide}/>
+                <label style={{...st.inputLabel,textAlign:"center"}}>始めた時間</label>
+                <input type="datetime-local" value={bfStartInput} onChange={e=>setBfStartInput(e.target.value)}
+                  style={{...st.input,fontSize:wide?19:15,padding:wide?"14px":"10px 12px",textAlign:"center",fontWeight:700}}/>
                 <button onClick={confirmBf} style={{...st.submitBtn,background:"#F08080",fontSize:wide?20:16,padding:wide?16:14}}>
                   {bfSide} {bfMin}分で記録する
                 </button>
